@@ -1,0 +1,60 @@
+{"frames": {
+
+"bg_star_3.png":
+{
+	"frame": {"x":1,"y":1,"w":511,"h":697},
+	"rotated": false,
+	"trimmed": false,
+	"spriteSourceSize": {"x":0,"y":0,"w":511,"h":697},
+	"sourceSize": {"w":511,"h":697}
+},
+"bg_star_4.png":
+{
+	"frame": {"x":1,"y":700,"w":511,"h":697},
+	"rotated": false,
+	"trimmed": false,
+	"spriteSourceSize": {"x":0,"y":0,"w":511,"h":697},
+	"sourceSize": {"w":511,"h":697}
+},
+"bg_star_5.png":
+{
+	"frame": {"x":514,"y":1,"w":511,"h":697},
+	"rotated": false,
+	"trimmed": false,
+	"spriteSourceSize": {"x":0,"y":0,"w":511,"h":697},
+	"sourceSize": {"w":511,"h":697}
+},
+"show_star_3.png":
+{
+	"frame": {"x":1027,"y":1,"w":511,"h":697},
+	"rotated": false,
+	"trimmed": false,
+	"spriteSourceSize": {"x":0,"y":0,"w":511,"h":697},
+	"sourceSize": {"w":511,"h":697}
+},
+"show_star_4.png":
+{
+	"frame": {"x":514,"y":700,"w":511,"h":697},
+	"rotated": false,
+	"trimmed": false,
+	"spriteSourceSize": {"x":0,"y":0,"w":511,"h":697},
+	"sourceSize": {"w":511,"h":697}
+},
+"show_star_5.png":
+{
+	"frame": {"x":1027,"y":700,"w":511,"h":697},
+	"rotated": false,
+	"trimmed": false,
+	"spriteSourceSize": {"x":0,"y":0,"w":511,"h":697},
+	"sourceSize": {"w":511,"h":697}
+}},
+"meta": {
+	"app": "https://www.codeandweb.com/texturepacker",
+	"version": "1.0",
+	"image": "wuwa_atlas.png",
+	"format": "RGBA8888",
+	"size": {"w":1539,"h":1398},
+	"scale": "1",
+	"smartupdate": "$TexturePacker:SmartUpdate:0bef6b5be14d82cedd61c1d8ec2564d1:aed6baad483d4bbacf2b494688c81e19:0b4464242df590c83cdafbe5739cc9f9$"
+}
+}
