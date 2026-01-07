@@ -138,7 +138,8 @@ class ResourcesDownloader:
             return None
         
         # 仅对GitHub URL进行特殊处理
-        if "github" in url.lower():
+        is_github_url = "github" in url.lower()
+        if is_github_url:
             # 1. 执行GitHub连通性测试
             try:
                 can_access_github = self.check_github_connectivity()

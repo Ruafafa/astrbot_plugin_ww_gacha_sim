@@ -1,22 +1,26 @@
 
 import React, { useState, useMemo } from 'react';
-import { PoolConfig, Language } from '../types';
+import { PoolConfig, Language, GachaItem } from '../types';
 import { translations } from '../i18n';
 
 interface ConfigManagerProps {
   configs: PoolConfig[];
+  items: GachaItem[];
   onEdit: (config: PoolConfig) => void;
   onCreate: () => void;
   onDelete: (idx: number) => void;
   selectedIdx: number | null;
   setSelectedIdx: (idx: number | null) => void;
   language: Language;
+  selectedGroup: string;
+  onSelectGroup: (group: string) => void;
 }
 
-export const ConfigManager: React.FC<ConfigManagerProps> = ({ configs, onEdit, onCreate, onDelete, selectedIdx, setSelectedIdx, language }) => {
+export const ConfigManager: React.FC<ConfigManagerProps> = ({ 
+  configs, items, onEdit, onCreate, onDelete, selectedIdx, setSelectedIdx, language, selectedGroup, onSelectGroup 
+}) => {
   const t = translations[language];
   const [showGroupDropdown, setShowGroupDropdown] = useState(false);
-  const [selectedGroup, setSelectedGroup] = useState('default');
 
   // 获取所有唯一的配置组
   const configGroups = useMemo(() => {
@@ -65,7 +69,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({ configs, onEdit, o
                   <button
                     key={idx}
                     onClick={() => {
-                      setSelectedGroup(group);
+                      onSelectGroup(group);
                       setShowGroupDropdown(false);
                     }}
                     className={`w-full flex items-center justify-between px-6 py-3 text-left text-sm font-bold transition-all ${selectedGroup === group ? 'bg-indigo-50 text-indigo-600' : 'text-slate-700 hover:bg-slate-50'}`}
@@ -93,6 +97,12 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({ configs, onEdit, o
         {filteredConfigs.map((config) => {
           // 使用原configs数组的索引
           const originalIndex = configs.indexOf(config);
+          
+          // 获取UP物品信息
+          const upItemIds = config.rate_up_item_ids['5star'] || [];
+          const upItems = upItemIds.map(id => items.find(i => i.id === id)).filter(Boolean) as GachaItem[];
+          const upItemNames = upItems.map(i => i.name).join(', ');
+
           return (
             <div 
               key={originalIndex}
@@ -141,6 +151,16 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({ configs, onEdit, o
                       className="bg-amber-400 h-full rounded-full transition-all duration-700 ease-out" 
                       style={{ width: `${Math.min(config.probability_settings.base_5star_rate * 1000, 100)}%` }}
                     ></div>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-200/50 space-y-1.5">
+                  <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    <span>{language === 'zh' ? '5星 UP物品' : '5-Star UP Items'}</span>
+                    <span className="text-indigo-500 font-black">{(config.probability_settings.up_5star_rate * 100).toFixed(0)}% UP</span>
+                  </div>
+                  <div className="text-xs font-bold text-slate-700 truncate" title={upItemNames}>
+                    {upItemNames || (language === 'zh' ? '无' : 'None')}
                   </div>
                 </div>
                 

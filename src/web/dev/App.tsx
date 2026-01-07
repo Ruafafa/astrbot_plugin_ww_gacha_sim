@@ -12,9 +12,9 @@ const DEFAULT_CONFIG: PoolConfig = {
   name: 'Standard Pool',
   config_group: 'default',
   probability_settings: {
-    base_5star_rate: 0.006,
-    base_4star_rate: 0.051,
-    base_3star_rate: 0.943,
+    base_5star_rate: 0.008,
+    base_4star_rate: 0.06,
+    base_3star_rate: 0.932,
     up_5star_rate: 0.5,
     up_4star_rate: 0.5,
     four_star_character_rate: 0.5,
@@ -22,7 +22,7 @@ const DEFAULT_CONFIG: PoolConfig = {
   rate_up_item_ids: { '5star': [], '4star': [] },
   included_item_ids: { '5star': [], '4star': [], '3star': [] },
   probability_progression: {
-    '5star': { hard_pity_pull: 90, hard_pity_rate: 1.0, soft_pity: [{ start_pull: 74, end_pull: 89, increment: 0.06 }] },
+    '5star': { hard_pity_pull: 80, hard_pity_rate: 1.0, soft_pity: [{ start_pull: 74, end_pull: 79, increment: 0.06 }] },
     '4star': { hard_pity_pull: 10, hard_pity_rate: 1.0, soft_pity: [] },
   },
 };
@@ -377,13 +377,16 @@ const App: React.FC = () => {
           <div className="max-w-[1600px] mx-auto">
             {currentView === 'configs' && (
               <ConfigManager 
-                configs={configs} 
+                configs={configs}
+                items={items} 
                 onEdit={handleEditConfig} 
                 onCreate={handleCreateNewConfig}
                 onDelete={(idx) => setConfigToDeleteIdx(idx)}
                 selectedIdx={selectedConfigIdx}
                 setSelectedIdx={setSelectedConfigIdx}
                 language={language}
+                selectedGroup={selectedConfigGroup}
+                onSelectGroup={setSelectedConfigGroup}
               />
             )}
             {currentView === 'items' && (

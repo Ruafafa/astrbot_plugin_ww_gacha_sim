@@ -305,19 +305,23 @@ class UIResourceManager:
         # 使用缓存管理器清理过期缓存
         self.cache_manager.clear_expired_cache()
     
-    def download_resource(self, url_or_path: str, cache_key: Optional[str] = None, is_portrait_path: bool = False):
+    def get_resource(self, url_or_path: str, cache_key: Optional[str] = None, is_portrait_path: bool = False):
         """统一的资源下载方法，返回缓存文件路径或None"""
         # 统一处理路径和URL
         normalized_path = url_or_path.replace('\\', '/')
         
-        if is_portrait_path:
+        # 检查是否为完整的URL（以http://或https://开头）
+        if normalized_path.startswith(('http://', 'https://')):
+            # 如果是完整URL，直接使用
+            full_url = normalized_path
+        elif is_portrait_path:
             # 对于portrait路径，构建完整的GitHub URL
             # 确保路径以正斜杠开头
             if not normalized_path.startswith('/'):
                 normalized_path = '/' + normalized_path
             full_url = self.base_download_url.rstrip('/') + normalized_path
         else:
-            # 如果是完整的URL，直接使用
+            # 如果是相对路径，直接使用
             full_url = normalized_path
         
         # 清除URL末尾的多余空格，避免因空格导致的404错误
@@ -389,11 +393,21 @@ class UIResourceManager:
             # 规范化路径
             normalized_path = portrait_path.replace('\\', '/').rstrip()
             
+            # 检查是否为完整URL
+            if normalized_path.startswith(('http://', 'https://')):
+                # 这是一个完整URL，直接下载
+                cached_file_path = self.get_resource(normalized_path, cache_key, is_portrait_path=False)
+                if cached_file_path:
+                    return str(cached_file_path)
+                else:
+                    self.logger.warning(f"Download failed {normalized_path}: resource unavailable, returning placeholder")
+                    print(f"下载资源失败 {normalized_path}: 资源不可用，返回占位图")
+                    return self._get_default_resource(item_name)
             # 检查是否为相对路径（需要拼接GitHub URL）
-            if not normalized_path.startswith(('/', str(self.resource_dir))):
+            elif not normalized_path.startswith(('/', str(self.resource_dir))):
                 # 这是一个相对路径，需要通过GitHub下载
                 print(f"本地资源 {normalized_path} 不存在，尝试从GitHub下载...")
-                cached_file_path = self.download_resource(normalized_path, cache_key, is_portrait_path=True)
+                cached_file_path = self.get_resource(normalized_path, cache_key, is_portrait_path=True)
                 if cached_file_path:
                     return str(cached_file_path)
                 else:
@@ -416,7 +430,7 @@ class UIResourceManager:
                     else:
                         # 本地文件不存在，尝试从GitHub下载
                         print(f"本地资源 {normalized_path} 不存在，尝试从GitHub下载...")
-                        cached_file_path = self.download_resource(normalized_path, cache_key, is_portrait_path=True)
+                        cached_file_path = self.get_resource(normalized_path, cache_key, is_portrait_path=True)
                         if cached_file_path:
                             return str(cached_file_path)
                         else:
@@ -428,7 +442,7 @@ class UIResourceManager:
                 else:
                     # 其他情况，尝试从GitHub下载
                     print(f"资源 {normalized_path} 不存在，尝试从GitHub下载...")
-                    cached_file_path = self.download_resource(normalized_path, cache_key, is_portrait_path=True)
+                    cached_file_path = self.get_resource(normalized_path, cache_key, is_portrait_path=True)
                     if cached_file_path:
                         return str(cached_file_path)
                     else:

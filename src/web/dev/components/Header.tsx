@@ -78,7 +78,7 @@ export const Header: React.FC<HeaderProps> = ({ language, setLanguage, onConfigD
   };
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 lg:px-10 shrink-0 z-40">
+    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-center lg:justify-between px-6 lg:px-10 shrink-0 z-40">
       <div className="flex items-center gap-4">
         <h2 className="text-sm font-black text-slate-600 uppercase tracking-widest">{t.console_title}</h2>
       </div>

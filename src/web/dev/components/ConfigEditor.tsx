@@ -15,11 +15,7 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ config, items, onSav
   const t = translations[language];
   const [formData, setFormData] = useState<PoolConfig>({ ...config });
   const [activeDropdown, setActiveDropdown] = useState<Rarity | null>(null);
-  const [searchQueries, setSearchQueries] = useState<Record<Rarity, string>>({
-    '5star': '',
-    '4star': '',
-    '3star': ''
-  });
+  const [searchQueries, setSearchQueries] = useState<Record<string, string>>({});
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -49,29 +45,41 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ config, items, onSav
     }
   }, [formData.probability_settings.base_5star_rate, formData.probability_settings.base_4star_rate]);
 
-  const handleToggleItem = (rarity: Rarity, itemId: number) => {
-    const current = formData.included_item_ids[rarity];
+  const handleToggleItem = (rarity: Rarity, itemId: number, isRateUp: boolean = false) => {
+    if (isRateUp && rarity === '3star') return; // No 3-star rate up
+    
+    const collectionKey = isRateUp ? 'rate_up_item_ids' : 'included_item_ids';
+    // @ts-ignore - dynamic key access
+    const current = formData[collectionKey][rarity];
     const isIncluded = current.includes(itemId);
-    const updated = isIncluded ? current.filter(id => id !== itemId) : [...current, itemId];
+    const updated = isIncluded ? current.filter((id: number) => id !== itemId) : [...current, itemId];
     
     setFormData({
       ...formData,
-      included_item_ids: { ...formData.included_item_ids, [rarity]: updated }
+      [collectionKey]: { ...formData[collectionKey as keyof PoolConfig], [rarity]: updated }
     });
   };
 
-  const handleSelectAll = (rarity: Rarity) => {
+  const handleSelectAll = (rarity: Rarity, isRateUp: boolean = false) => {
+    if (isRateUp && rarity === '3star') return;
+
     const allIds = items.filter(i => i.rarity === rarity).map(i => i.id);
+    const collectionKey = isRateUp ? 'rate_up_item_ids' : 'included_item_ids';
+    
     setFormData({
       ...formData,
-      included_item_ids: { ...formData.included_item_ids, [rarity]: allIds }
+      [collectionKey]: { ...formData[collectionKey as keyof PoolConfig], [rarity]: allIds }
     });
   };
 
-  const handleDeselectAll = (rarity: Rarity) => {
+  const handleDeselectAll = (rarity: Rarity, isRateUp: boolean = false) => {
+    if (isRateUp && rarity === '3star') return;
+
+    const collectionKey = isRateUp ? 'rate_up_item_ids' : 'included_item_ids';
+
     setFormData({
       ...formData,
-      included_item_ids: { ...formData.included_item_ids, [rarity]: [] }
+      [collectionKey]: { ...formData[collectionKey as keyof PoolConfig], [rarity]: [] }
     });
   };
 
@@ -122,29 +130,36 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ config, items, onSav
     });
   };
 
-  const renderItemManager = (rarity: Rarity) => {
-    const included = formData.included_item_ids[rarity];
+  const renderItemManager = (rarity: Rarity, isRateUp: boolean = false) => {
+    const collectionKey = isRateUp ? 'rate_up_item_ids' : 'included_item_ids';
+    // @ts-ignore
+    const included = formData[collectionKey][rarity] || [];
     
     // 直接过滤出对应稀有度的物品
     const rarityItems = items.filter(i => i.rarity === rarity);
     const includedItems = rarityItems.filter(i => included.includes(i.id));
     const availableItems = rarityItems.filter(i => !included.includes(i.id));
     
-    // Filter available items based on search query
-    const searchQuery = searchQueries[rarity] || '';
+    const searchKey = `${rarity}-${isRateUp ? 'up' : 'pool'}`;
+    const searchQuery = searchQueries[searchKey] || '';
+    
+    // First filter by search query
     const filteredAvailableItems = availableItems.filter(item => 
-      item.name.toLowerCase().includes(searchQuery.toLowerCase())
+      item.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      item.id.toString().includes(searchQuery)
     );
     
-    const rarityLabel = rarity === '5star' ? t.rarity_5 : 
-                        rarity === '4star' ? t.rarity_4 : t.rarity_3;
+    const rarityLabel = rarity === '5star' ? (language === 'zh' ? '5星' : '5-Star') : 
+                        rarity === '4star' ? (language === 'zh' ? '4星' : '4-Star') : (language === 'zh' ? '3星' : '3-Star');
     const colorClass = rarity === '5star' ? 'text-amber-500' : 
                        rarity === '4star' ? 'text-purple-500' : 'text-sky-500';
     const indicatorClass = rarity === '5star' ? 'bg-amber-400' : 
                           rarity === '4star' ? 'bg-purple-400' : 'bg-sky-400';
+    
+    const dropdownId = searchKey;
 
     return (
-      <div className="space-y-2" key={rarity}>
+      <div className="space-y-2" key={searchKey}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className={`w-0.5 h-3 rounded-full ${indicatorClass}`}></div>
@@ -155,17 +170,17 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ config, items, onSav
           </div>
           <div className="flex gap-1.5">
             <button 
-              onClick={() => handleSelectAll(rarity)}
+              onClick={() => handleSelectAll(rarity, isRateUp)}
               className="text-[9px] font-bold text-indigo-400 hover:text-indigo-600 transition-colors"
-              title="全选当前配置组对应稀有度的所有物品"
+              title="全选"
             >
               全选
             </button>
             <span className="text-slate-200 text-[8px] self-center">|</span>
             <button 
-              onClick={() => handleDeselectAll(rarity)}
+              onClick={() => handleDeselectAll(rarity, isRateUp)}
               className="text-[9px] font-bold text-rose-300 hover:text-rose-500 transition-colors"
-              title="取消全选当前配置组对应稀有度的所有物品"
+              title="取消全选"
             >
               取消
             </button>
@@ -173,12 +188,12 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ config, items, onSav
         </div>
 
         <div className="relative">
-          <div className="flex flex-wrap gap-1 p-1.5 bg-slate-50 border border-slate-200 rounded-lg min-h-[38px] transition-all cursor-text hover:border-slate-300 focus-within:border-indigo-300 focus-within:shadow-sm">
+          <div className="flex flex-wrap gap-1 p-1.5 bg-slate-50 border border-slate-200 rounded-lg min-h-[38px] max-h-[80px] overflow-y-auto custom-scrollbar transition-all cursor-text hover:border-slate-300 focus-within:border-indigo-300 focus-within:shadow-sm">
             {includedItems.map(item => (
               <div key={item.id} className="flex items-center gap-1 bg-white border border-slate-200 pl-1.5 pr-1 py-0.5 rounded-md shadow-sm animate-fadeIn group">
-                <span className="text-[10px] font-black text-slate-700">{item.name}</span>
+                <span className="text-[10px] font-black text-slate-700">{item.name} <span className="text-[8px] text-slate-400 font-normal">({item.id})</span></span>
                 <button 
-                  onClick={() => handleToggleItem(rarity, item.id)}
+                  onClick={() => handleToggleItem(rarity, item.id, isRateUp)}
                   className="text-slate-300 hover:text-rose-500 transition-colors p-0.5"
                   title="移除物品"
                 >
@@ -193,34 +208,34 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ config, items, onSav
             {/* Inline search input */}
             <input
               type="text"
-              value={searchQueries[rarity]}
+              value={searchQueries[searchKey] || ''}
               onChange={(e) => {
-                setSearchQueries(prev => ({ ...prev, [rarity]: e.target.value }));
+                setSearchQueries(prev => ({ ...prev, [searchKey]: e.target.value }));
                 // Show dropdown when user starts typing
-                if (!activeDropdown) setActiveDropdown(rarity);
+                if (activeDropdown !== dropdownId) setActiveDropdown(dropdownId as any);
               }}
-              onFocus={() => setActiveDropdown(rarity)}
+              onFocus={() => setActiveDropdown(dropdownId as any)}
               placeholder="搜索物品..."
               className="flex-1 min-w-[120px] p-0.5 text-[10px] font-bold text-slate-700 bg-transparent border-none outline-none"
             />
           </div>
           
           {/* Dropdown for available items */}
-          <div className="mt-1" ref={rarity === activeDropdown ? dropdownRef : null}>
-            {activeDropdown === rarity && (
+          <div className="mt-1" ref={activeDropdown === dropdownId as any ? dropdownRef : null}>
+            {activeDropdown === dropdownId as any && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-50 max-h-36 overflow-y-auto custom-scrollbar animate-notification">
                 {filteredAvailableItems.length > 0 ? (
                   filteredAvailableItems.map(item => (
                     <button 
                       key={item.id}
                       onClick={() => { 
-                        handleToggleItem(rarity, item.id); 
+                        handleToggleItem(rarity, item.id, isRateUp); 
                         // Clear search after selection
-                        setSearchQueries(prev => ({ ...prev, [rarity]: '' }));
+                        setSearchQueries(prev => ({ ...prev, [searchKey]: '' }));
                       }}
                       className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-indigo-50 transition-colors border-b border-slate-50 last:border-0"
                     >
-                      <span className="font-bold text-slate-700 text-[9px]">{item.name}</span>
+                      <span className="font-bold text-slate-700 text-[9px]">{item.name} <span className="text-slate-400 font-normal">({item.id})</span></span>
                       <i className="fas fa-plus text-[7px] text-indigo-400"></i>
                     </button>
                   ))
@@ -396,6 +411,20 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ config, items, onSav
             {renderItemManager('5star')}
             {renderItemManager('4star')}
             {renderItemManager('3star')}
+          </div>
+        </div>
+
+        {/* UP Item Selection */}
+        <div className="p-5 border-b border-slate-100 space-y-4 bg-slate-50/10">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-pink-600 text-white flex items-center justify-center shadow-sm">
+              <i className="fas fa-star text-xs"></i>
+            </div>
+            <h3 className="text-sm font-black text-slate-800 tracking-tight">UP 物品选择</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {renderItemManager('5star', true)}
+            {renderItemManager('4star', true)}
           </div>
         </div>
 
