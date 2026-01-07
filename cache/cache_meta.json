@@ -1,0 +1,14 @@
+{
+  "sprite_bg_star_5.png": {
+    "created_at": 1767705575.2148943,
+    "expires_at": 1767709175.2148943,
+    "size": 592923,
+    "type": "image"
+  },
+  "sprite_show_star_5.png": {
+    "created_at": 1767705575.290086,
+    "expires_at": 1767709175.290086,
+    "size": 89117,
+    "type": "image"
+  }
+}

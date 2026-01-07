@@ -1,0 +1,11 @@
+{
+    "sqltools.useNodeRuntime": true,
+    "sqltools.connections": [
+        {
+            "previewLimit": 50,
+            "driver": "SQLite",
+            "database": "E:\\ww_plugins\\AstrBot\\data\\ww_gacha_sim_data.db",
+            "name": "1"
+        }
+    ]
+}

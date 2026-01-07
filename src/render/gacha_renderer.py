@@ -3,23 +3,24 @@
 负责实现抽卡结果的可视化渲染
 """
 import os
-import json
-from pathlib import Path
+import logging
 from PIL import Image, ImageDraw, ImageFont
 from typing import List
-from src.core.item_model import Item
-from src.rendering.ui_resources import UIResourceManager
+from ..item_data.item_manager import Item
+from .ui_resources_manager import UIResourceManager
+
+# 配置日志
+logger = logging.getLogger(__name__)
 
 
 
 class GachaRenderer:
     """抽卡结果渲染器"""
     
-    def __init__(self):
-        self.resource_manager = UIResourceManager()
+    def __init__(self, ui_resource_manager: UIResourceManager = UIResourceManager()):
+        self.ui_resource_manager = ui_resource_manager 
         # 确保字体目录存在
         self.font_path = self._get_font_path()
-        
         # 渲染参数
         self.card_width = 430
         self.card_height = 560
@@ -27,35 +28,6 @@ class GachaRenderer:
         self.h_gap = -50  # 水平间距 (列与列之间的间距)
         self.v_gap = 30  # 垂直间距 (行与行之间的间距)
         
-        # 加载配置文件以获取输出路径
-        self.output_dir = self._get_output_directory()
-        
-
-    def _get_output_directory(self) -> str:
-        """从配置文件获取输出目录路径，如果配置不存在则使用默认值
-        
-        配置方法：
-        在 config/gacha_config.json 中添加如下配置：
-        {
-          "output": {
-            "directory": "path/to/your/output/directory"
-          }
-        }
-        """
-        try:
-            config_path = Path("config/gacha_config.json")
-            if config_path.exists():
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                    output_dir = config.get("output", {}).get("directory", "output")
-            else:
-                output_dir = "output"
-        except (json.JSONDecodeError, FileNotFoundError):
-            output_dir = "output"
-        
-        # 确保输出目录存在
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        return output_dir
     
     def _get_font_path(self) -> str:
         """获取字体路径"""
@@ -115,7 +87,7 @@ class GachaRenderer:
 
         # --- 图层 2: 背景层 (Background) ---
         bg_sprite_name = f"bg_star_{rarity}.png"
-        bg_img = self.resource_manager._extract_sprite_from_atlas(bg_sprite_name, remove_transparent_border=False)
+        bg_img = self.ui_resource_manager._extract_sprite_from_atlas(bg_sprite_name, remove_transparent_border=False)
         if bg_img:
             # 背景通常铺满原始卡片区域
             bg_layer = get_scaled_layer(bg_img, W, H, cover=True)
@@ -123,14 +95,14 @@ class GachaRenderer:
             card.paste(bg_layer, (0, 0), bg_layer)
         else:
             # 后备方案
-            bg_path = self.resource_manager.get_background_for_quality(rarity)
+            bg_path = self.ui_resource_manager.get_background_for_quality(rarity)
             bg_layer = Image.open(bg_path).convert('RGBA').resize((W, H))
             # 直接放置在画布上，不需要偏移
             card.paste(bg_layer, (0, 0))
 
         # --- 图层 3: 立绘层 (Portrait) ---
         try:
-            portrait_path = self.resource_manager.get_resource_path_from_item_name(item_name)
+            portrait_path = self.ui_resource_manager.get_resource_path_from_item_name(item_name)
             if os.path.exists(portrait_path):
                 portrait_raw = Image.open(portrait_path)
                 # 按比例计算立绘目标尺寸
@@ -145,15 +117,13 @@ class GachaRenderer:
                 py = element_bottom_y - portrait_layer.height  # 元素顶部的Y坐标
                 card.paste(portrait_layer, (px, py), portrait_layer)
         except Exception as e:
-            print(f"立绘加载失败: {e}")
+            logger.warning(f"立绘加载失败: {e}")
 
         # --- 图层 3.5: 半调图案层 (Halftone Pattern Layer) --- 信息层之上，图标层之下
         try:
             # 加载半调图案
-            bandiao_path = Path("assets") / "bandiao.png"
-            if bandiao_path.exists():
-                bandiao_img = Image.open(bandiao_path).convert('RGBA')
-                
+            bandiao_img = self.ui_resource_manager.get_halftone_pattern()
+            if bandiao_img:
                 # 调整半调图案大小以适应卡片
                 scaled_bandiao = bandiao_img.resize((W, H), Image.Resampling.LANCZOS)
                 
@@ -167,13 +137,13 @@ class GachaRenderer:
                 # 将半调图案绘制到卡片上，向下偏移一定距离
                 card.paste(scaled_bandiao, (0, offset_y), scaled_bandiao)
             else:
-                print(f"警告: 半调图案 {bandiao_path} 不存在，无法绘制半调图案")
+                logger.warning("警告: 半调图案不存在，无法绘制半调图案")
         except Exception as e:
-            print(f"半调图案加载失败: {e}")
+            logger.warning(f"半调图案加载失败: {e}")
 
         # --- 图层 4: 信息展示层 (Info/Show Layer) ---
         show_sprite_name = f"show_star_{rarity}.png"
-        show_img = self.resource_manager._extract_sprite_from_atlas(show_sprite_name, remove_transparent_border=False)  # 不再移除透明边界以保持一致的定位基准
+        show_img = self.ui_resource_manager._extract_sprite_from_atlas(show_sprite_name, remove_transparent_border=False)  # 不再移除透明边界以保持一致的定位基准
         if show_img:
             info_w = W * LAYOUT["info"]["width_ratio"] + 4
             # 使用固定的高度比例来确保所有星级的信息展示层位置一致
@@ -188,23 +158,16 @@ class GachaRenderer:
 
         # --- 图层 5: 图标层 (Icon Layer) --- 信息层上方，位于左侧开头
         at = item.affiliated_type.title()
-        # 构建图标路径，使用Path对象直接构建
-        icon_path = Path("assets") / "icons" / f'T_{at}.png'
 
         try:
             # 尝试加载图标
-            if icon_path.exists():
-                icon_img = Image.open(icon_path).convert('RGBA')
+            icon_path_str = self.ui_resource_manager.get_icon_path(at)
+            if icon_path_str:
+                icon_img = Image.open(icon_path_str).convert('RGBA')
             else:
-                # 图标不存在，尝试使用默认图标
-                default_icon_path = Path("assets") / "icons" / "T_Spectro.png"
-                if default_icon_path.exists():
-                    icon_img = Image.open(default_icon_path).convert('RGBA')
-                    print(f"警告: 图标 {icon_path} 不存在，使用默认图标")
-                else:
-                    # 默认图标也不存在，跳过绘制
-                    print(f"警告: 默认图标 {default_icon_path} 不存在，无法绘制图标")
-                    icon_img = None
+                # 图标不存在，跳过绘制
+                logger.warning(f"警告: 图标 {at} 不存在，无法绘制图标")
+                icon_img = None
             
             if icon_img:
                 # 计算图标大小和位置
@@ -224,12 +187,13 @@ class GachaRenderer:
                 # 绘制图标到卡片上
                 card.paste(dimmed_icon, (icon_x, icon_y), dimmed_icon)
         except Exception as e:
-            print(f"图标加载失败: {e}")
+            logger.warning(f"图标加载失败: {e}")
 
         # 移除文字渲染层
         return card
+
     
-    def render_single_pull(self, item: Item) -> str:
+    def render_single_pull(self, item: Item) -> Image:
         """渲染单次抽卡结果"""
         card = self._create_single_card(item)
         
@@ -252,10 +216,10 @@ class GachaRenderer:
         draw.text((text_x, text_y), warning_text, font=font, fill=(255, 255, 255, 200))
         
         # --- 使用T_LuckdrawBg.png作为单抽背景，进行精确裁剪优化 --- 
-        bg_path = Path("assets") / "T_LuckdrawBg.png"
-        if bg_path.exists():
+        bg_path_str = self.ui_resource_manager.get_background_path()
+        if bg_path_str:
             # 加载背景图片
-            bg_image = Image.open(bg_path).convert('RGBA')
+            bg_image = Image.open(bg_path_str).convert('RGBA')
             bg_width, bg_height = bg_image.size
             
             # --- 精确裁剪背景 --- 
@@ -286,36 +250,24 @@ class GachaRenderer:
             # 将卡片粘贴到裁剪后的背景上
             full_image.paste(card, (card_x, card_y), card)
             
-            # 生成输出文件名 - use item name and rarity from the item object
-            output_path = os.path.join(self.output_dir, f"single_pull_{item.name}_{item.rarity}.png")
-            
-            # 确保输出目录存在 before saving
-            Path(self.output_dir).mkdir(parents=True, exist_ok=True)
-            
-            try:
-                full_image.save(output_path)
-            except (OSError, PermissionError) as e:
-                raise RuntimeError(f"无法保存图像到 {output_path}: {str(e)}")
+            return full_image
         else:
             # 如果背景图片不存在，使用原来的单卡片渲染
-            output_path = os.path.join(self.output_dir, f"single_pull_{item.name}_{item.rarity}.png")
-            
-            # 确保输出目录存在 before saving
-            Path(self.output_dir).mkdir(parents=True, exist_ok=True)
-            
-            try:
-                card.save(output_path)
-            except (OSError, PermissionError) as e:
-                raise RuntimeError(f"无法保存图像到 {output_path}: {str(e)}")
-        
-        return output_path
+            return card
     
-    def render_ten_pulls(self, results: List[Item]) -> str:
+    
+    def render_ten_pulls(self, results: List[Item]) -> Image:
         """渲染十连抽卡结果"""  
         # 按星级和类型排序：星级高的在前，星级相同的角色在前
         def sort_key(item):
             # 星级高的在前（降序），角色优先于武器（角色=0，武器=1）
-            return (-item.rarity, 0 if item.type == 'character' else 1)
+            # 将稀有度转换为数值进行比较
+            rarity_value = {
+                '5star': 5,
+                '4star': 4,
+                '3star': 3
+            }.get(item.rarity, 0)
+            return (-rarity_value, 0 if item.type == 'character' else 1)
 
         # 排序结果
         sorted_results = sorted(results, key=sort_key)
@@ -329,10 +281,10 @@ class GachaRenderer:
         total_height = rows * self.card_height + (rows + 1) * self.v_gap
         
         # 尝试加载背景图片
-        bg_path = self.resource_manager.resource_dir / "T_LuckdrawBg.png"
-        if bg_path.exists():
+        bg_path_str = self.ui_resource_manager.get_background_path()
+        if bg_path_str:
             # 加载背景图片
-            bg_image = Image.open(bg_path).convert('RGBA')
+            bg_image = Image.open(bg_path_str).convert('RGBA')
             bg_width, bg_height = bg_image.size
             
             # 使用背景图片作为基础图像，保持原始尺寸
@@ -371,7 +323,6 @@ class GachaRenderer:
             else:
                 full_image.paste(card, (x, y))
         
-        
         # --- 添加警告文字 --- 模拟抽卡仅供娱乐，素材版权属于库洛
         draw = ImageDraw.Draw(full_image)
         warning_text = "模拟抽卡仅供娱乐，素材版权属于库洛"
@@ -390,42 +341,4 @@ class GachaRenderer:
         # 绘制文字，使用半透明白色
         draw.text((text_x, text_y), warning_text, font=font, fill=(255, 255, 255, 200))
 
-        # 保存图像
-        import time
-        timestamp = int(time.time())
-        output_path = os.path.join(self.output_dir, f"ten_pulls_{timestamp}.png")
-        
-        # 确保输出目录存在 before saving
-        Path(self.output_dir).mkdir(parents=True, exist_ok=True)
-        
-        try:
-            full_image.save(output_path)
-        except (OSError, PermissionError) as e:
-            raise RuntimeError(f"无法保存图像到 {output_path}: {str(e)}")
-        
-        return output_path
-
-# 示例使用
-if __name__ == "__main__":
-    renderer = GachaRenderer()
-    
-    # 测试单个卡片渲染
-    card_path = renderer.render_single_pull("凌阳", 5)
-    print(f"单个卡片已保存到: {card_path}")
-    
-    # 测试十连渲染
-    test_results = [
-        ("凌阳", 5, 0),
-        ("安可", 5, 0),
-        ("白芷", 4, 0),
-        ("散华", 4, 0),
-        ("3星武器", 3, 0),
-        ("桃祈", 4, 0),
-        ("渊武", 4, 0),
-        ("维里奈", 5, 0),
-        ("灯灯", 4, 0),
-        ("莫特斐", 4, 0)
-    ]
-    
-    ten_pull_path = renderer.render_ten_pulls(test_results)
-    print(f"十连抽卡结果已保存到: {ten_pull_path}")
+        return full_image

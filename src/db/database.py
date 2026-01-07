@@ -1,185 +1,158 @@
 """
 数据库交互模块
 负责所有与数据库相关的操作，包括数据查询、插入、更新和删除
+只包含基本的、业务无关的数据库操作方法
 """
 import sqlite3
+import logging
+from pathlib import Path
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Any
+from typing import List, Dict, Any
 
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-class GachaDatabase:
-    def __init__(self, db_path='data/gacha_data.db'):
+# 定义插件路径
+PLUGIN_PATH = Path(__file__).parent.parent.parent
+
+class CommonDatabase:
+    """通用数据库操作类"""
+
+    def __init__(self, db_path: Path = PLUGIN_PATH.parent.parent / 'ww_gacha_sim_data.db'):
+        """
+        初始化数据库连接
+        
+        Args:
+            db_path: 数据库文件路径
+        """
         self.db_path = db_path
+        self._ensure_directory_exists()
         self.init_db()
+        logger.info(f"初始化数据库连接: {self.db_path}")
+
+    def _ensure_directory_exists(self):
+        """确保数据库所在目录存在"""
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
     def init_db(self):
-        """初始化数据库表结构"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # 创建用户表
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id TEXT PRIMARY KEY,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # 创建抽卡状态表（存储用户当前的抽卡状态）
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS gacha_states (
-                user_id TEXT PRIMARY KEY,
-                pity_5star INTEGER DEFAULT 0,
-                pity_4star INTEGER DEFAULT 0,
-                _5star_guaranteed BOOLEAN DEFAULT 0,
-                _4star_guaranteed BOOLEAN DEFAULT 0,
-                pull_count INTEGER DEFAULT 0,
-                FOREIGN KEY (user_id) REFERENCES users (user_id)
-            )
-        ''')
-        
-        # 创建抽卡历史记录表
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS pull_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT,
-                item TEXT,
-                rarity TEXT,
-                pull_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (user_id)
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
+        """初始化数据库表结构 - 由子类或专门的初始化函数负责"""
+        pass
 
     @contextmanager
     def get_connection(self):
         """数据库连接上下文管理器，确保连接正确关闭"""
-        conn = sqlite3.connect(self.db_path)
+        conn = None
         try:
+            conn = sqlite3.connect(self.db_path)
+            conn.execute('PRAGMA foreign_keys = ON')  # 启用外键约束
+            conn.execute('PRAGMA journal_mode = WAL')  # 启用WAL模式，提高并发性能
             yield conn
-        except Exception as e:
-            conn.rollback()
-            raise e
+        except sqlite3.Error as e:
+            logger.error(f"数据库连接错误: {e}")
+            if conn:
+                conn.rollback()
+            raise
         finally:
-            conn.close()
+            if conn:
+                conn.close()
 
-    def create_user(self, user_id: str):
-        """创建新用户"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
-            conn.commit()
+    # 通用数据库操作方法
+    def execute_query(self, query: str, params: tuple = ()) -> List[sqlite3.Row]:
+        """
+        执行查询操作
+        
+        Args:
+            query: SQL查询语句
+            params: 查询参数
+            
+        Returns:
+            查询结果列表
+        """
+        try:
+            with self.get_connection() as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                return cursor.fetchall()
+        except sqlite3.Error as e:
+            logger.error(f"查询执行错误: {e}, SQL: {query}, Params: {params}")
+            raise
 
-    def save_user_state(self, user_id: str, state_data: Dict[str, Any]):
-        """保存用户抽卡状态"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
+    def execute_query_single(self, query: str, params: tuple = ()) -> sqlite3.Row:
+        """
+        执行查询操作，返回单个结果
+        
+        Args:
+            query: SQL查询语句
+            params: 查询参数
             
-            # 检查用户是否存在，不存在则创建
-            cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
-            if not cursor.fetchone():
-                cursor.execute('INSERT INTO users (user_id) VALUES (?)', (user_id,))
-            
-            cursor.execute('''
-                INSERT OR REPLACE INTO gacha_states 
-                (user_id, pity_5star, pity_4star, _5star_guaranteed, _4star_guaranteed, pull_count)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                user_id,
-                state_data['pity_5star'],
-                state_data['pity_4star'],
-                int(state_data['_5star_guaranteed']),
-                int(state_data['_4star_guaranteed']),
-                state_data['pull_count']
-            ))
-            
-            conn.commit()
+        Returns:
+            查询结果，如果没有结果返回None
+        """
+        results = self.execute_query(query, params)
+        return results[0] if results else None
 
-    def load_user_state(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """加载用户抽卡状态"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT pity_5star, pity_4star, _5star_guaranteed, _4star_guaranteed, pull_count
-                FROM gacha_states
-                WHERE user_id = ?
-            ''', (user_id,))
+    def execute_update(self, query: str, params: tuple = ()) -> int:
+        """
+        执行更新操作（INSERT, UPDATE, DELETE）
+        
+        Args:
+            query: SQL更新语句
+            params: 更新参数
             
-            row = cursor.fetchone()
-            if not row:
-                return None
-            
-            return {
-                'pity_5star': row[0],
-                'pity_4star': row[1],
-                '_5star_guaranteed': bool(row[2]),
-                '_4star_guaranteed': bool(row[3]),
-                'pull_count': row[4]
-            }
+        Returns:
+            影响的行数
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                conn.commit()
+                logger.debug(f"更新执行成功，影响行数: {cursor.rowcount}, SQL: {query}, Params: {params}")
+                return cursor.rowcount
+        except sqlite3.Error as e:
+            logger.error(f"更新执行错误: {e}, SQL: {query}, Params: {params}")
+            raise
 
-    def save_pull_history(self, user_id: str, pull_data: Dict[str, Any]):
-        """保存单次抽卡记录"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO pull_history 
-                (user_id, item, rarity, pull_time)
-                VALUES (?, ?, ?, ?)
-            ''', (
-                user_id,
-                pull_data['item'],
-                '未知',  # 暂时使用默认值，后续可以从物品详情获取
-                pull_data['pull_time']
-            ))
-            conn.commit()
+    def execute_many(self, query: str, params_list: List[tuple]) -> int:
+        """
+        执行批量操作
+        
+        Args:
+            query: SQL语句
+            params_list: 参数列表
+            
+        Returns:
+            影响的行数
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.executemany(query, params_list)
+                conn.commit()
+                logger.debug(f"批量执行成功，影响行数: {cursor.rowcount}, SQL: {query}")
+                return cursor.rowcount
+        except sqlite3.Error as e:
+            logger.error(f"批量执行错误: {e}, SQL: {query}")
+            raise
 
-    def save_pull_history_batch(self, user_id: str, pull_history_list: List[Dict[str, Any]]):
-        """批量保存抽卡记录"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.executemany('''
-                INSERT INTO pull_history 
-                (user_id, item, rarity, pull_time)
-                VALUES (?, ?, ?, ?)
-            ''', [
-                (user_id, record['item'], 
-                 '未知',  # 暂时使用默认值，后续可以从物品详情获取
-                 record['pull_time']) for record in pull_history_list
-            ])
-            conn.commit()
+    def execute_script(self, script: str) -> None:
+        """
+        执行SQL脚本
+        
+        Args:
+            script: SQL脚本内容
+        """
+        try:
+            with self.get_connection() as conn:
+                conn.executescript(script)
+                conn.commit()
+                logger.debug("SQL脚本执行成功")
+        except sqlite3.Error as e:
+            logger.error(f"SQL脚本执行错误: {e}")
+            raise
 
-    def load_pull_history(self, user_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """加载用户抽卡历史"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            query = 'SELECT item, pull_time FROM pull_history WHERE user_id = ? ORDER BY id'
-            params = [user_id]
-            
-            if limit:
-                query += ' LIMIT ?'
-                params.append(limit)
-            
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            
-            return [{
-                'item': row[0],
-                'pull_time': row[1]
-            } for row in rows]
-
-    def get_user_statistics(self, user_id: str) -> Dict[str, int]:
-        """获取用户统计数据"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT COUNT(*) as total_pulls
-                FROM pull_history
-                WHERE user_id = ?
-            ''', (user_id,))
-            
-            stats = cursor.fetchone()
-            return {
-                'total_pulls': stats[0] if stats[0] else 0
-            }
+    def close(self):
+        """关闭数据库连接（占位方法，实际由上下文管理器处理）"""
+        pass

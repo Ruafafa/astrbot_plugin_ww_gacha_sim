@@ -125,7 +125,7 @@ class GachaFlow:
         # 创建抽卡结果字典
         pull_result = {
             'item': item_obj.name if item_obj else "未知物品",
-            'rarity': item_obj.rarity if item_obj else 3,
+            'rarity': item_obj.rarity if item_obj else '3star',
             'item_obj': item_obj
         }
 
