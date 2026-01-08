@@ -34,7 +34,6 @@ class GachaDBOperations:
             max_workers=2, 
             thread_name_prefix="GachaDB-"
         )  # 数据库操作线程池
-        logger.info("抽卡数据库操作管理器初始化完成")
 
     def _init_business_tables(self):
         """初始化业务相关的数据库表结构"""

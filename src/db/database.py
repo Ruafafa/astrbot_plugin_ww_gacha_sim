@@ -7,7 +7,7 @@ import sqlite3
 import logging
 from pathlib import Path
 from contextlib import contextmanager
-from typing import List, Dict, Any
+from typing import List
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -19,7 +19,7 @@ PLUGIN_PATH = Path(__file__).parent.parent.parent
 class CommonDatabase:
     """通用数据库操作类"""
 
-    def __init__(self, db_path: Path = PLUGIN_PATH.parent.parent / 'ww_gacha_sim_data.db'):
+    def __init__(self, db_path: Path = PLUGIN_PATH.parent.parent / 'plugin_data' / 'astrbot_plugin_ww_gacha_sim' / 'ww_gacha_sim_data.db'):
         """
         初始化数据库连接
         
@@ -29,7 +29,6 @@ class CommonDatabase:
         self.db_path = db_path
         self._ensure_directory_exists()
         self.init_db()
-        logger.info(f"初始化数据库连接: {self.db_path}")
 
     def _ensure_directory_exists(self):
         """确保数据库所在目录存在"""

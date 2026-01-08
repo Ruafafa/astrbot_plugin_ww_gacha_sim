@@ -2,8 +2,6 @@
 UI资源渲染模块
 负责抽卡相关的UI资源（如图像、音效、动画文件）的渲染相关逻辑
 """
-import os
-import sys
 import hashlib
 import logging
 from PIL import Image
@@ -18,14 +16,15 @@ from .local_file_cache_manager import LocalFileCacheManager
 
 def safe_json_load(file_path: Path) -> Dict:
     """安全的JSON加载工具函数"""
+    logger = logging.getLogger(__name__)
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"警告: 配置文件 {file_path} 不存在，将使用默认配置")
+        logger.warning(f"文件 {file_path} 不存在，将使用默认配置")
         return {}
     except json.JSONDecodeError:
-        print(f"警告: 配置文件 {file_path} 格式错误，将使用默认配置")
+        logger.warning(f"文件 {file_path} 格式错误，将使用默认配置")
         return {}
 
 
@@ -33,37 +32,16 @@ class UIResourceManager:
     """UI资源管理类"""
     
     def __init__(self, 
-        resource_dir: Path = None,    
-        local_file_cache_dir: Path = None,
+        resource_dir: Path = PLUGIN_PATH / "src" / "assets",    
         resources_downloader: ResourcesDownloader = None,
         cache_manager: LocalFileCacheManager = None
      ):
-        # 设置默认值
-        if resource_dir is None:
-            resource_dir = PLUGIN_PATH / "src" / "assets"
-        if local_file_cache_dir is None:
-            local_file_cache_dir = PLUGIN_PATH / "cache"
-        if resources_downloader is None:
-            resources_downloader = ResourcesDownloader()
-        if cache_manager is None:
-            cache_manager = LocalFileCacheManager(local_file_cache_dir)
         # 初始化日志记录器
         self.logger = logging.getLogger(self.__class__.__name__)
         
         self.resource_dir = resource_dir
-        self.local_file_cache_dir = local_file_cache_dir
-        self.resources_downloader = resources_downloader
-        self.cache_manager = cache_manager
-        
-        # 加载配置
-        config_path = PLUGIN_PATH / "config" / "gacha_config.json"
-        self.config_path = config_path
-        self.config_data = safe_json_load(Path(config_path))
-        
-        # 构建基础下载URL
-        base_url = self.config_data.get("ui_resources", {}).get("base_download_url", "https://raw.githubusercontent.com/TomyJan/WutheringWaves-UIResources/")
-        version = self.config_data.get("ui_resources", {}).get("version", "3.0")
-        self.base_download_url = f'{base_url}{version}/'.rstrip()
+        self.resources_downloader = resources_downloader if resources_downloader is not None else ResourcesDownloader()
+        self.cache_manager = cache_manager if cache_manager is not None else LocalFileCacheManager()
         
         # 加载精灵表配置
         self.sprite_atlas = safe_json_load(self.resource_dir / "gacha_atlas.json")
@@ -101,7 +79,7 @@ class UIResourceManager:
             if atlas_img.mode != 'RGBA':
                 atlas_img = atlas_img.convert('RGBA')
         except FileNotFoundError:
-            print(f"警告: 精灵表图像 {atlas_path} 不存在")
+            self.logger.warning(f"精灵表图像 {atlas_path} 不存在")
             return None
         
         # 获取精灵帧信息
@@ -212,20 +190,20 @@ class UIResourceManager:
         if resource_types is None:
             resource_types = ['character_images', 'weapon_images', 'backgrounds', 'icons']
         
-        print(f"开始预加载资源: {resource_types}")
+        self.logger.info(f"开始预加载资源: {resource_types}")
         for resource_type in resource_types:
-            print(f"预加载 {resource_type}...")
+            self.logger.info(f"预加载 {resource_type}...")
             # 这里可以实现具体的预加载逻辑
             # 例如从本地或远程加载资源到缓存
             self._load_resource_by_type(resource_type)
-        print("资源预加载完成")
+        self.logger.info("资源预加载完成")
 
     def _load_resource_by_type(self, resource_type: str):
         """根据资源类型加载资源"""
         # 模拟加载逻辑
         resource_path = self.resource_dir / resource_type
         resource_path.mkdir(exist_ok=True)
-        print(f"  - {resource_type} 资源路径: {resource_path}")
+        self.logger.debug(f"  - {resource_type} 资源路径: {resource_path}")
 
     def get_resource_path(self, resource_name: str) -> Optional[str]:
         """获取指定资源的本地路径，优先检查缓存"""
@@ -242,7 +220,7 @@ class UIResourceManager:
                 return self._get_resource_by_link(portrait_path, resource_name)
             except (ImportError, ValueError):
                 # 如果无法获取详细信息，返回占位图
-                return self._get_default_resource(resource_name)
+                return self._get_default_resource()
     
     def _get_resource_by_link(self, resource_link: str, resource_name: str) -> str:
         """根据资源链接获取资源路径（统一处理逻辑）"""
@@ -261,28 +239,28 @@ class UIResourceManager:
             # 检查是否为网络链接
             if normalized_link.startswith(('http://', 'https://')):
                 # 是网络链接，直接下载
-                print(f"资源 {resource_name} 缓存不存在，正在下载...")
+                self.logger.info(f"资源 {resource_name} 缓存不存在，正在下载...")
                 content = self.resources_downloader.download_with_retry(normalized_link)
                 if content:
                     # 保存到缓存
                     cached_file_path = self.cache_manager.cache_file(content, cache_key)
                     return str(cached_file_path)
                 else:
-                    print(f"资源 {resource_name} 下载失败，返回占位图")
-                    return self._get_default_resource(resource_name)
+                    self.logger.warning(f"资源 {resource_name} 下载失败，返回占位图")
+                    return self._get_default_resource()
             else:
                 # 是相对路径或本地路径，统一通过GitHub下载
-                print(f"资源 {resource_name} 缓存不存在，正在通过GitHub下载...")
+                self.logger.info(f"资源 {resource_name} 缓存不存在，正在通过GitHub下载...")
                 # 构建完整的GitHub URL
-                full_url = self.base_download_url.rstrip('/') + '/' + normalized_link.lstrip('/')
+                full_url = self.resources_downloader.get_download_url(normalized_link)
                 content = self.resources_downloader.download_with_retry(full_url)
                 if content:
                     # 保存到缓存
                     cached_file_path = self.cache_manager.cache_file(content, cache_key)
                     return str(cached_file_path)
                 else:
-                    print(f"资源 {resource_name} 通过GitHub下载失败，返回占位图")
-                    return self._get_default_resource(resource_name)
+                    self.logger.warning(f"资源 {resource_name} 通过GitHub下载失败，返回占位图")
+                    return self._get_default_resource()
 
     def get_background_for_quality(self, quality: int) -> str:
         """根据品质获取背景路径"""
@@ -300,11 +278,6 @@ class UIResourceManager:
             default_bg_path = f"assets/backgrounds/bg_{quality}star.png"
             return default_bg_path
     
-    def cleanup_cache_if_needed(self):
-        """清理过期缓存"""
-        # 使用缓存管理器清理过期缓存
-        self.cache_manager.clear_expired_cache()
-    
     def get_resource(self, url_or_path: str, cache_key: Optional[str] = None, is_portrait_path: bool = False):
         """统一的资源下载方法，返回缓存文件路径或None"""
         # 统一处理路径和URL
@@ -319,7 +292,7 @@ class UIResourceManager:
             # 确保路径以正斜杠开头
             if not normalized_path.startswith('/'):
                 normalized_path = '/' + normalized_path
-            full_url = self.base_download_url.rstrip('/') + normalized_path
+            full_url = self.resources_downloader.get_download_url(normalized_path)
         else:
             # 如果是相对路径，直接使用
             full_url = normalized_path
@@ -331,13 +304,6 @@ class UIResourceManager:
         if cache_key is None:
             cache_key = hashlib.md5(normalized_path.encode()).hexdigest()
         
-        # 检查是否需要清理缓存
-        try:
-            self.cleanup_cache_if_needed()
-        except Exception as e:
-            self.logger.warning(f"Error during cache cleanup: {e}")
-            print(f"⚠️  缓存清理失败: {e}")
-        
         # 使用资源下载器下载资源
         content = self.resources_downloader.download_with_retry(full_url)
         if content:
@@ -347,14 +313,12 @@ class UIResourceManager:
             return cached_file_path
         else:
             self.logger.warning(f"Resource download failed: {full_url}")
-            print(f"❌ 资源下载失败: {full_url}")
         
         # 如果是portrait路径，尝试从本地assets目录查找资源作为降级策略
         if is_portrait_path:
             try:
                 local_path = self.resource_dir / normalized_path.replace('UIResources/', '')
                 if local_path.exists():
-                    print(f"✅ 在本地找到资源: {local_path}")
                     self.logger.info(f"Found local resource: {local_path}")
                     # 将本地资源复制到缓存
                     with open(local_path, 'rb') as f:
@@ -363,7 +327,6 @@ class UIResourceManager:
                     return cached_file_path
             except Exception as e:
                 self.logger.error(f"Error checking local resource: {e}")
-                print(f"❌ 检查本地资源失败: {e}")
         
         return None
     
@@ -388,7 +351,7 @@ class UIResourceManager:
                 return self._get_default_resource()
             
             if not portrait_path:
-                return self._get_default_resource(item_name)
+                return self._get_default_resource()
             
             # 规范化路径
             normalized_path = portrait_path.replace('\\', '/').rstrip()
@@ -401,21 +364,19 @@ class UIResourceManager:
                     return str(cached_file_path)
                 else:
                     self.logger.warning(f"Download failed {normalized_path}: resource unavailable, returning placeholder")
-                    print(f"下载资源失败 {normalized_path}: 资源不可用，返回占位图")
-                    return self._get_default_resource(item_name)
+                    return self._get_default_resource()
             # 检查是否为相对路径（需要拼接GitHub URL）
             elif not normalized_path.startswith(('/', str(self.resource_dir))):
                 # 这是一个相对路径，需要通过GitHub下载
-                print(f"本地资源 {normalized_path} 不存在，尝试从GitHub下载...")
+                self.logger.info(f"本地资源 {normalized_path} 不存在，尝试从GitHub下载...")
                 cached_file_path = self.get_resource(normalized_path, cache_key, is_portrait_path=True)
                 if cached_file_path:
                     return str(cached_file_path)
                 else:
                     # 构建并清理URL，避免因空格导致的错误信息不准确
-                    error_url = (self.base_download_url.rstrip('/') + '/' + normalized_path.lstrip('/')).rstrip()
+                    error_url = self.resources_downloader.get_download_url(normalized_path.lstrip('/')).rstrip()
                     self.logger.warning(f"Download failed {error_url}: resource unavailable, returning placeholder")
-                    print(f"下载资源失败 {error_url}: 资源不可用，返回占位图")
-                    return self._get_default_resource(item_name)
+                    return self._get_default_resource()
             else:
                 # 检查是否为真正的本地路径（以资源目录开头）
                 if normalized_path.startswith(str(self.resource_dir)):
@@ -429,30 +390,28 @@ class UIResourceManager:
                         return str(cached_file_path)
                     else:
                         # 本地文件不存在，尝试从GitHub下载
-                        print(f"本地资源 {normalized_path} 不存在，尝试从GitHub下载...")
+                        self.logger.info(f"本地资源 {normalized_path} 不存在，尝试从GitHub下载...")
                         cached_file_path = self.get_resource(normalized_path, cache_key, is_portrait_path=True)
                         if cached_file_path:
                             return str(cached_file_path)
                         else:
                             # 构建并清理URL，避免因空格导致的错误信息不准确
-                            error_url = (self.base_download_url.rstrip('/') + '/' + normalized_path.lstrip('/')).rstrip()
+                            error_url = self.resources_downloader.get_download_url(normalized_path.lstrip('/')).rstrip()
                             self.logger.warning(f"Download failed {error_url}: resource unavailable, returning placeholder")
-                            print(f"下载资源失败 {error_url}: 资源不可用，返回占位图")
-                            return self._get_default_resource(item_name)
+                            return self._get_default_resource()
                 else:
                     # 其他情况，尝试从GitHub下载
-                    print(f"资源 {normalized_path} 不存在，尝试从GitHub下载...")
+                    self.logger.info(f"资源 {normalized_path} 不存在，尝试从GitHub下载...")
                     cached_file_path = self.get_resource(normalized_path, cache_key, is_portrait_path=True)
                     if cached_file_path:
                         return str(cached_file_path)
                     else:
                         # 构建并清理URL，避免因空格导致的错误信息不准确
-                        error_url = (self.base_download_url.rstrip('/') + '/' + normalized_path.lstrip('/')).rstrip()
+                        error_url = self.resources_downloader.get_download_url(normalized_path.lstrip('/')).rstrip()
                         self.logger.warning(f"Download failed {error_url}: resource unavailable, returning placeholder")
-                        print(f"下载资源失败 {error_url}: 资源不可用，返回占位图")
-                        return self._get_default_resource(item_name)
+                        return self._get_default_resource()
                         
-    def _get_default_resource(self, resource_name: str = "default") -> str:
+    def _get_default_resource(self) -> str:
         """获取默认资源路径（占位图）"""
         # 返回默认占位图路径
         default_path = self.resource_dir / "placeholder.png"

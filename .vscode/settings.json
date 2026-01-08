@@ -4,8 +4,13 @@
         {
             "previewLimit": 50,
             "driver": "SQLite",
-            "database": "E:\\ww_plugins\\AstrBot\\data\\ww_gacha_sim_data.db",
+            "database": "E:\\ww_plugins\\AstrBot\\data\\plugin_data\\astrbot_plugin_ww_gacha_sim\\ww_gacha_sim_data.db",
             "name": "1"
         }
-    ]
+    ],
+    "python.testing.pytestArgs": [
+        "."
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
 }

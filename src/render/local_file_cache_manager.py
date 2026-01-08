@@ -1,25 +1,34 @@
 import hashlib
 import json
 import time
+import logging
+import threading
 from pathlib import Path
 from typing import Union, Optional
 from PIL import Image
 
 from . import PLUGIN_PATH
 
+logger = logging.getLogger(__name__)
+
 class LocalFileCacheManager:
     """本地文件缓存管理器"""
     
-    def __init__(self, cache_dir: Path(PLUGIN_PATH / "cache")):
+    def __init__(self, cache_dir: Path = Path(PLUGIN_PATH / "cache"), cleanup_interval: int = 24):
         """
         初始化缓存管理器
         
         Args:
             cache_dir: 缓存目录路径
+            cleanup_interval: 缓存清理周期（单位：小时），默认24小时
         """
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.meta_file = self.cache_dir / "cache_meta.json"
+        self.cleanup_interval = cleanup_interval * 3600  # 转换为秒
+        self.last_cleanup_time = 0
+        self._cleanup_timer = None
+        self._cleanup_lock = threading.Lock()
         self._load_cache_meta()
     
     def _load_cache_meta(self):
@@ -32,6 +41,8 @@ class LocalFileCacheManager:
                 self.cache_meta = {}
         else:
             self.cache_meta = {}
+        
+        self._start_scheduled_cleanup()
     
     def _save_cache_meta(self):
         """保存缓存元数据"""
@@ -213,6 +224,11 @@ class LocalFileCacheManager:
         
         for key in expired_keys:
             self._remove_cache(key)
+        
+        self.last_cleanup_time = current_time
+        
+        if expired_keys:
+            logger.info(f"清理了 {len(expired_keys)} 个过期缓存项")
     
     def clear_all_cache(self):
         """清理所有缓存"""
@@ -228,3 +244,36 @@ class LocalFileCacheManager:
         for cache_file in self.cache_dir.glob("*.cache"):
             total_size += cache_file.stat().st_size
         return total_size
+    
+    def _start_scheduled_cleanup(self):
+        """启动定时清理任务"""
+        if self._cleanup_timer is not None:
+            return
+        
+        def _cleanup_task():
+            """定时清理任务"""
+            try:
+                self.clear_expired_cache()
+            except Exception as e:
+                logger.error(f"定时清理缓存时发生错误: {e}")
+            finally:
+                with self._cleanup_lock:
+                    if self._cleanup_timer is not None:
+                        self._cleanup_timer = threading.Timer(self.cleanup_interval, _cleanup_task)
+                        self._cleanup_timer.daemon = True
+                        self._cleanup_timer.start()
+        
+        with self._cleanup_lock:
+            if self._cleanup_timer is None:
+                self._cleanup_timer = threading.Timer(self.cleanup_interval, _cleanup_task)
+                self._cleanup_timer.daemon = True
+                self._cleanup_timer.start()
+                logger.info(f"已启动定时缓存清理任务，清理周期: {self.cleanup_interval / 3600} 小时")
+    
+    def stop_scheduled_cleanup(self):
+        """停止定时清理任务"""
+        with self._cleanup_lock:
+            if self._cleanup_timer is not None:
+                self._cleanup_timer.cancel()
+                self._cleanup_timer = None
+                logger.info("已停止定时缓存清理任务")

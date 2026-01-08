@@ -109,7 +109,13 @@ def items():
     if request.method == 'GET':
         config_group = request.args.get('config_group', 'default')
     elif request.method == 'POST':
-        config_group = data.get('config_group', request.args.get('config_group', 'default'))
+        if isinstance(data, list):
+            if len(data) > 0 and 'config_group' in data[0]:
+                config_group = data[0]['config_group']
+            else:
+                config_group = request.args.get('config_group', 'default')
+        else:
+            config_group = data.get('config_group', request.args.get('config_group', 'default'))
     elif request.method == 'PUT':
         config_group = data.get('config_group', request.args.get('config_group', 'default'))
     elif request.method == 'DELETE':
@@ -159,14 +165,23 @@ def items():
     elif request.method == 'POST':
         # 添加物品
         try:
-            result = item_ops.add_item(data, table_name)
-            if result:
-                # 获取刚添加的物品ID
-                items_list = item_ops.get_items_list(table_name)
-                item_id = items_list[-1]['id'] if items_list else 1
-                return jsonify({'success': True, 'item_id': item_id})
+            if isinstance(data, list):
+                # 批量添加
+                result = item_ops.add_items_batch(data, table_name)
+                if result:
+                    return jsonify({'success': True, 'message': f'成功添加 {len(data)} 个物品'})
+                else:
+                    return jsonify({'success': False, 'message': '批量添加物品失败'})
             else:
-                return jsonify({'success': False, 'message': '添加物品失败'})
+                # 单个添加
+                result = item_ops.add_item(data, table_name)
+                if result:
+                    # 获取刚添加的物品ID
+                    items_list = item_ops.get_items_list(table_name)
+                    item_id = items_list[-1]['id'] if items_list else 1
+                    return jsonify({'success': True, 'item_id': item_id})
+                else:
+                    return jsonify({'success': False, 'message': '添加物品失败'})
         except Exception as e:
             return jsonify({'success': False, 'message': str(e)})
     

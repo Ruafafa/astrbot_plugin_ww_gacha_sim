@@ -193,7 +193,7 @@ class GachaRenderer:
         return card
 
     
-    def render_single_pull(self, item: Item) -> Image:
+    def render_single_pull(self, item: Item) -> Image.Image:
         """渲染单次抽卡结果"""
         card = self._create_single_card(item)
         
@@ -256,7 +256,7 @@ class GachaRenderer:
             return card
     
     
-    def render_ten_pulls(self, results: List[Item]) -> Image:
+    def render_ten_pulls(self, results: List[Item]) -> Image.Image:
         """渲染十连抽卡结果"""  
         # 按星级和类型排序：星级高的在前，星级相同的角色在前
         def sort_key(item):

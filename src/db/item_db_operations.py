@@ -26,7 +26,6 @@ class ItemDBOperations:
         """
         self.db = db
         self._init_tables()
-        logger.info("物品数据库操作管理器初始化完成")
     
     def _init_tables(self, table_name='items'):
         """初始化物品相关的数据库表结构

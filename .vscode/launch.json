@@ -4,7 +4,13 @@
     // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        
+        {
+            "name": "Python Debugger: AstrBot",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "E:\\ww_plugins\\AstrBot\\main.py",
+            "console": "integratedTerminal"
+        },
         {
             "name": "Python Debugger: Flask",
             "type": "debugpy",

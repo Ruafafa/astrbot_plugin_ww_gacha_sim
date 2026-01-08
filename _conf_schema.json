@@ -10,17 +10,17 @@
     "type": "object",
     "hint": "配置渲染时用到的资源下载源",
     "items": {
-      "primary_url": {
+      "primary_sources_url": {
         "description": "主要源URL",
         "type": "string",
         "hint": "主要资源下载源的URL地址",
-        "default": "https://example.com/resources/primary"
+        "default": "https://raw.githubusercontent.com/TomyJan/WutheringWaves-UIResources/3.0/"
       },
-      "mirror_url": {
+      "mirror_sources_url": {
         "description": "镜像源URL",
-        "type": "string",
+        "type": "list",
         "hint": "镜像资源下载源的URL地址，当主要源不可用时使用",
-        "default": "https://mirror.example.com/resources"
+        "default": ["https://gitee.com", "https://hub.fastgit.org", "https://ghproxy.com"]
       }
     }
   },
@@ -37,6 +37,9 @@
     "default": false
   },
   "render_output_path": {
+    "description": "渲染结果保存路径",
+    "type": "string",
+    "hint": "抽卡结果图片的保存目录路径",
     "default": "./rendered_results"
   },
   "cache_cleanup_interval": {

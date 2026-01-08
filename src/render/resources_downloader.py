@@ -16,13 +16,14 @@ logger = logging.getLogger(__name__)
 class ResourcesDownloader:
     """网络资源访问优化器"""
     
-    def __init__(self, sources: str = "https://raw.githubusercontent.com/TomyJan/WutheringWaves-UIResources/3.0/",
+    def __init__(self, primary_sources: str = "https://raw.githubusercontent.com/TomyJan/WutheringWaves-UIResources/3.0/",
         mirror_sources: list[str] = ["https://gitee.com", "https://hub.fastgit.org", "https://ghproxy.com"]
     ):
-
-        self.sources = sources
+        self.main_sources = primary_sources
         self.mirror_sources = mirror_sources
 
+        self.sources = primary_sources.rstrip('/')
+        
         # 请求头
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -30,6 +31,12 @@ class ResourcesDownloader:
         # 记录当前是否使用镜像源
         self.using_mirror = False
         self.current_mirror = None
+    
+    def get_download_url(self, relative_path: str) -> str:
+        """构建完整的下载URL"""
+        if relative_path.startswith('/'):
+            relative_path = relative_path[1:]
+        return f"{self.sources}{relative_path}"
     
     def check_github_connectivity(self) -> bool:
         """
@@ -121,12 +128,10 @@ class ResourcesDownloader:
                 logger.warning(f"Mirror source timeout: {mirror}")
             except httpx.RequestError as e:
                 logger.error(f"Request error when accessing mirror: {mirror}, Error: {e}")
-                print(f"❌ 无法访问镜像源: {mirror}, 错误: {e}")
             except Exception as e:
                 logger.error(f"Unexpected error when accessing mirror: {mirror}, Error: {e}")
-                print(f"❌ 无法访问镜像源: {mirror}, 错误: {e}")
         
-        print("❌ 所有镜像源都不可用")
+        logger.error("所有镜像源都不可用")
         logger.error("All mirror sources are unavailable")
         return None
     

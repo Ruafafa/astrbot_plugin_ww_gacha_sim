@@ -6,6 +6,7 @@ import { translations } from '../i18n';
 interface ItemManagerProps {
   items: GachaItem[];
   onAdd: (item: Omit<GachaItem, 'id'>) => void;
+  onAddItems?: (items: Omit<GachaItem, 'id'>[]) => void;
   onUpdate?: (item: GachaItem) => void; 
   onDelete: (id: number) => void;
   language: Language;
@@ -17,6 +18,7 @@ interface ItemManagerProps {
 export const ItemManager: React.FC<ItemManagerProps> = ({ 
   items, 
   onAdd, 
+  onAddItems,
   onUpdate, 
   onDelete, 
   language, 
@@ -33,10 +35,54 @@ export const ItemManager: React.FC<ItemManagerProps> = ({
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [showPathModal, setShowPathModal] = useState(false);
   const [currentPath, setCurrentPath] = useState<string>('');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [sortConfig, setSortConfig] = useState<{ key: keyof GachaItem | null; direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // 根据当前选择的配置组过滤物品
   const filteredItems = items.filter(item => item.config_group === selectedConfigGroup);
+  
+  // 根据搜索词过滤物品
+  const searchedItems = searchTerm 
+    ? filteredItems.filter(item => 
+        item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.type.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.affiliated_type.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.rarity.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    : filteredItems;
+  
+  // 排序逻辑
+  const sortedItems = [...searchedItems].sort((a, b) => {
+    if (sortConfig.key === null) return 0;
+    
+    const aValue = a[sortConfig.key];
+    const bValue = b[sortConfig.key];
+    
+    // 使用localeCompare确保中文按拼音排序
+    const comparison = typeof aValue === 'string' && typeof bValue === 'string' 
+      ? aValue.localeCompare(bValue, 'zh-CN', { sensitivity: 'base' })
+      : aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
+    
+    return sortConfig.direction === 'asc' ? comparison : -comparison;
+  });
+  
+  // 处理排序点击
+  const handleSort = (key: keyof GachaItem) => {
+    setSortConfig(prev => {
+      if (prev.key === key) {
+        return {
+          key,
+          direction: prev.direction === 'asc' ? 'desc' : 'asc'
+        };
+      } else {
+        return {
+          key,
+          direction: 'asc'
+        };
+      }
+    });
+  };
   
   const [formData, setFormData] = useState<Omit<GachaItem, 'id'>>({
     name: '',
@@ -129,7 +175,7 @@ export const ItemManager: React.FC<ItemManagerProps> = ({
 
   const handleExportCSV = () => {
     const headers = ['name', 'rarity', 'type', 'affiliated_type', 'portrait_path'];
-    const rows = filteredItems.map(item => [
+    const rows = sortedItems.map(item => [
       item.name,
       item.rarity,
       item.type,
@@ -185,8 +231,28 @@ export const ItemManager: React.FC<ItemManagerProps> = ({
       });
       console.log('Parsed CSV data:', importedData);
 
+      // 准备数据
+      const itemsToAdd = importedData.map(item => {
+        let rarity: Rarity = '4star'; // 默认值
+        if (item.rarity) {
+          const rarityStr = String(item.rarity).trim();
+          if (['3', '4', '5', '3star', '4star', '5star'].includes(rarityStr)) {
+            rarity = rarityStr as Rarity;
+          }
+        }
+        
+        return {
+          name: item.name || 'Imported Item',
+          rarity: rarity,
+          type: item.type || 'Character',
+          affiliated_type: item.affiliated_type || '',
+          config_group: selectedConfigGroup, // 使用当前选中的配置组
+          portrait_path: item.portrait_path || 'https://picsum.photos/400/400'
+        };
+      });
+
       // 显示进度弹窗
-      setImportProgress({ current: 0, total: importedData.length });
+      setImportProgress({ current: 0, total: itemsToAdd.length });
       setShowImportProgress(true);
 
       try {
@@ -197,39 +263,27 @@ export const ItemManager: React.FC<ItemManagerProps> = ({
         });
         console.log('Existing items cleared successfully');
 
-        // 逐个添加物品，显示进度
-        for (let index = 0; index < importedData.length; index++) {
-          const item = importedData[index];
-          console.log(`Processing item ${index + 1}:`, item);
-          
-          // Map the new fields to our Internal GachaItem type
-          // 处理稀有度，支持数字格式（3、4、5）和字符串格式（5star、4star、3star）
-          let rarity: Rarity = '4star'; // 默认值
-          if (item.rarity) {
-            const rarityStr = String(item.rarity).trim();
-            if (['3', '4', '5', '3star', '4star', '5star'].includes(rarityStr)) {
-              rarity = rarityStr as Rarity;
+        if (onAddItems) {
+            console.log('Using batch import...');
+            // 批量添加
+            await onAddItems(itemsToAdd);
+            setImportProgress({ current: itemsToAdd.length, total: itemsToAdd.length });
+        } else {
+            console.log('Using sequential import...');
+            // 逐个添加物品，显示进度
+            for (let index = 0; index < itemsToAdd.length; index++) {
+              const item = itemsToAdd[index];
+              console.log(`Processing item ${index + 1}:`, item);
+              
+              // 添加物品
+              await onAdd(item);
+              
+              // 更新进度
+              setImportProgress({ current: index + 1, total: itemsToAdd.length });
+              
+              // 短暂延迟，让进度条有机会更新
+              await new Promise(resolve => setTimeout(resolve, 10));
             }
-          }
-          
-          const gachaItem = {
-            name: item.name || 'Imported Item',
-            rarity: rarity,
-            type: item.type || 'Character',
-            affiliated_type: item.affiliated_type || '',
-            config_group: selectedConfigGroup, // 使用当前选中的配置组
-            portrait_path: item.portrait_path || 'https://picsum.photos/400/400'
-          };
-          console.log('Calling onAdd with:', gachaItem);
-          
-          // 添加物品
-          await onAdd(gachaItem);
-          
-          // 更新进度
-          setImportProgress({ current: index + 1, total: importedData.length });
-          
-          // 短暂延迟，让进度条有机会更新
-          await new Promise(resolve => setTimeout(resolve, 100));
         }
         
         console.log('CSV import completed');
@@ -284,6 +338,26 @@ export const ItemManager: React.FC<ItemManagerProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-3 relative">
+          {/* 搜索框 */}
+          <div className="relative mr-3 flex-1 max-w-md">
+            <i className="fas fa-search absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 text-sm"></i>
+            <input
+              type="text"
+              placeholder={language === 'zh' ? '搜索物品名称、类型、稀有度...' : 'Search items by name, type, rarity...'}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-12 pr-4 py-3 bg-white border-2 border-slate-300 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-medium transition-all shadow-sm"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-4 top-1/2 transform -translate-y-1/2 text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                <i className="fas fa-times-circle text-lg"></i>
+              </button>
+            )}
+          </div>
+          
           <button 
             onClick={() => setShowGroupDropdown(!showGroupDropdown)}
             className="px-6 py-3 rounded-2xl font-bold flex items-center gap-2 transition-all border-2 bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300 active:scale-95"
@@ -330,17 +404,77 @@ export const ItemManager: React.FC<ItemManagerProps> = ({
       <div className="bg-white rounded-[32px] overflow-hidden border border-slate-100 shadow-xl shadow-slate-200/50">
         <table className="w-full border-collapse">
           <thead>
-            <tr className="bg-slate-50/50 border-b border-slate-100">
-              <th className="px-8 py-5 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">{t.item_name}</th>
-              <th className="px-8 py-5 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">{t.item_rarity}</th>
-              <th className="px-8 py-5 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">{t.item_type}</th>
-              <th className="px-8 py-5 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">{language === 'zh' ? '附属类型' : 'Affiliated Type'}</th>
-              <th className="px-8 py-5 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">{t.item_illustration}</th>
+            <tr className="bg-slate-50/50 border-b-2 border-slate-200">
+              <th className="px-8 py-5 text-left text-[11px] font-black text-slate-600 uppercase tracking-widest">
+                <button 
+                  onClick={() => handleSort('name')}
+                  className="flex items-center gap-2 hover:text-indigo-600 transition-colors p-2 -m-2 rounded-lg hover:bg-indigo-50/50"
+                >
+                  {t.item_name}
+                  {sortConfig.key === 'name' ? (
+                    <i className={`fas fa-sort-${sortConfig.direction === 'asc' ? 'up' : 'down'} text-indigo-500 font-bold`}></i>
+                  ) : (
+                    <i className="fas fa-sort text-slate-400"></i>
+                  )}
+                </button>
+              </th>
+              <th className="px-8 py-5 text-left text-[11px] font-black text-slate-600 uppercase tracking-widest">
+                <button 
+                  onClick={() => handleSort('rarity')}
+                  className="flex items-center gap-2 hover:text-indigo-600 transition-colors p-2 -m-2 rounded-lg hover:bg-indigo-50/50"
+                >
+                  {t.item_rarity}
+                  {sortConfig.key === 'rarity' ? (
+                    <i className={`fas fa-sort-${sortConfig.direction === 'asc' ? 'up' : 'down'} text-indigo-500 font-bold`}></i>
+                  ) : (
+                    <i className="fas fa-sort text-slate-400"></i>
+                  )}
+                </button>
+              </th>
+              <th className="px-8 py-5 text-left text-[11px] font-black text-slate-600 uppercase tracking-widest">
+                <button 
+                  onClick={() => handleSort('type')}
+                  className="flex items-center gap-2 hover:text-indigo-600 transition-colors p-2 -m-2 rounded-lg hover:bg-indigo-50/50"
+                >
+                  {t.item_type}
+                  {sortConfig.key === 'type' ? (
+                    <i className={`fas fa-sort-${sortConfig.direction === 'asc' ? 'up' : 'down'} text-indigo-500 font-bold`}></i>
+                  ) : (
+                    <i className="fas fa-sort text-slate-400"></i>
+                  )}
+                </button>
+              </th>
+              <th className="px-8 py-5 text-left text-[11px] font-black text-slate-600 uppercase tracking-widest">
+                <button 
+                  onClick={() => handleSort('affiliated_type')}
+                  className="flex items-center gap-2 hover:text-indigo-600 transition-colors p-2 -m-2 rounded-lg hover:bg-indigo-50/50"
+                >
+                  {language === 'zh' ? '附属类型' : 'Affiliated Type'}
+                  {sortConfig.key === 'affiliated_type' ? (
+                    <i className={`fas fa-sort-${sortConfig.direction === 'asc' ? 'up' : 'down'} text-indigo-500 font-bold`}></i>
+                  ) : (
+                    <i className="fas fa-sort text-slate-400"></i>
+                  )}
+                </button>
+              </th>
+              <th className="px-8 py-5 text-left text-[11px] font-black text-slate-600 uppercase tracking-widest">
+                <button 
+                  onClick={() => handleSort('portrait_path')}
+                  className="flex items-center gap-2 hover:text-indigo-600 transition-colors p-2 -m-2 rounded-lg hover:bg-indigo-50/50"
+                >
+                  {t.item_illustration}
+                  {sortConfig.key === 'portrait_path' ? (
+                    <i className={`fas fa-sort-${sortConfig.direction === 'asc' ? 'up' : 'down'} text-indigo-500 font-bold`}></i>
+                  ) : (
+                    <i className="fas fa-sort text-slate-400"></i>
+                  )}
+                </button>
+              </th>
               <th className="px-8 py-5 text-right text-[11px] font-black text-slate-400 uppercase tracking-widest">{t.item_actions}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {filteredItems.map(item => {
+            {sortedItems.map(item => {
               const ui = getRarityUI(item.rarity);
               return (
                 <tr key={item.id} className="group hover:bg-slate-50 transition-colors">
@@ -397,12 +531,25 @@ export const ItemManager: React.FC<ItemManagerProps> = ({
             })}
           </tbody>
         </table>
-        {filteredItems.length === 0 && (
+        {sortedItems.length === 0 && (
           <div className="p-20 text-center">
             <div className="w-20 h-20 rounded-full bg-slate-50 flex items-center justify-center mx-auto mb-4 border-2 border-dashed border-slate-200">
               <i className="fas fa-box-open text-slate-300 text-2xl"></i>
             </div>
-            <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">暂无物品记录</p>
+            <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">
+              {searchTerm 
+                ? (language === 'zh' ? '未找到匹配的物品' : 'No matching items found')
+                : (language === 'zh' ? '暂无物品记录' : 'No items found')
+              }
+            </p>
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="mt-4 text-indigo-600 font-medium text-sm hover:underline"
+              >
+                {language === 'zh' ? '清除搜索' : 'Clear search'}
+              </button>
+            )}
           </div>
         )}
       </div>

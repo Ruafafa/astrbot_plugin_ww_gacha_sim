@@ -49,38 +49,85 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ config, items, onSav
     if (isRateUp && rarity === '3star') return; // No 3-star rate up
     
     const collectionKey = isRateUp ? 'rate_up_item_ids' : 'included_item_ids';
-    // @ts-ignore - dynamic key access
-    const current = formData[collectionKey][rarity];
-    const isIncluded = current.includes(itemId);
-    const updated = isIncluded ? current.filter((id: number) => id !== itemId) : [...current, itemId];
     
-    setFormData({
-      ...formData,
-      [collectionKey]: { ...formData[collectionKey as keyof PoolConfig], [rarity]: updated }
-    });
+    // 创建新的formData副本
+    const newFormData = { ...formData };
+    
+    if (!isRateUp) {
+      // 如果是从卡池物品中移除，同时检查并移除UP列表中相同的物品
+      // @ts-ignore - dynamic key access
+      const currentPool = newFormData['included_item_ids'][rarity];
+      const isIncluded = currentPool.includes(itemId);
+      const updatedPool = isIncluded ? currentPool.filter((id: number) => id !== itemId) : [...currentPool, itemId];
+      
+      // 更新卡池物品列表
+      newFormData['included_item_ids'] = { ...newFormData['included_item_ids'], [rarity]: updatedPool };
+      
+      // 如果是移除操作，检查并移除UP列表中相同的物品
+      if (isIncluded) {
+        // @ts-ignore - dynamic key access
+        const currentUp = newFormData['rate_up_item_ids'][rarity];
+        if (currentUp.includes(itemId)) {
+          const updatedUp = currentUp.filter((id: number) => id !== itemId);
+          newFormData['rate_up_item_ids'] = { ...newFormData['rate_up_item_ids'], [rarity]: updatedUp };
+        }
+      }
+    } else {
+      // 如果是添加UP物品，确保该物品已经在卡池物品列表中
+      // @ts-ignore - dynamic key access
+      const poolItems = newFormData['included_item_ids'][rarity];
+      
+      if (poolItems.includes(itemId)) {
+        // @ts-ignore - dynamic key access
+        const currentUp = newFormData['rate_up_item_ids'][rarity];
+        const isIncluded = currentUp.includes(itemId);
+        const updatedUp = isIncluded ? currentUp.filter((id: number) => id !== itemId) : [...currentUp, itemId];
+        
+        // 更新UP物品列表
+        newFormData['rate_up_item_ids'] = { ...newFormData['rate_up_item_ids'], [rarity]: updatedUp };
+      }
+    }
+    
+    setFormData(newFormData);
   };
 
   const handleSelectAll = (rarity: Rarity, isRateUp: boolean = false) => {
     if (isRateUp && rarity === '3star') return;
 
-    const allIds = items.filter(i => i.rarity === rarity).map(i => i.id);
     const collectionKey = isRateUp ? 'rate_up_item_ids' : 'included_item_ids';
+    const newFormData = { ...formData };
     
-    setFormData({
-      ...formData,
-      [collectionKey]: { ...formData[collectionKey as keyof PoolConfig], [rarity]: allIds }
-    });
+    if (isRateUp) {
+      // 全选UP物品时，只全选那些已经在卡池物品列表中的物品
+      // @ts-ignore - dynamic key access
+      const poolItems = newFormData['included_item_ids'][rarity];
+      const allUpIds = items.filter(i => i.rarity === rarity && poolItems.includes(i.id)).map(i => i.id);
+      newFormData['rate_up_item_ids'] = { ...newFormData['rate_up_item_ids'], [rarity]: allUpIds };
+    } else {
+      // 全选卡池物品时，不影响UP物品列表
+      const allIds = items.filter(i => i.rarity === rarity).map(i => i.id);
+      newFormData['included_item_ids'] = { ...newFormData['included_item_ids'], [rarity]: allIds };
+    }
+    
+    setFormData(newFormData);
   };
 
   const handleDeselectAll = (rarity: Rarity, isRateUp: boolean = false) => {
     if (isRateUp && rarity === '3star') return;
 
     const collectionKey = isRateUp ? 'rate_up_item_ids' : 'included_item_ids';
-
-    setFormData({
-      ...formData,
-      [collectionKey]: { ...formData[collectionKey as keyof PoolConfig], [rarity]: [] }
-    });
+    const newFormData = { ...formData };
+    
+    if (isRateUp) {
+      // 取消全选UP物品时，只清空UP物品列表
+      newFormData['rate_up_item_ids'] = { ...newFormData['rate_up_item_ids'], [rarity]: [] };
+    } else {
+      // 取消全选卡池物品时，同时清空对应的UP物品列表
+      newFormData['included_item_ids'] = { ...newFormData['included_item_ids'], [rarity]: [] };
+      newFormData['rate_up_item_ids'] = { ...newFormData['rate_up_item_ids'], [rarity]: [] };
+    }
+    
+    setFormData(newFormData);
   };
 
   const addSoftPityInterval = (rarity: '5star' | '4star') => {
@@ -137,8 +184,16 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ config, items, onSav
     
     // 直接过滤出对应稀有度的物品
     const rarityItems = items.filter(i => i.rarity === rarity);
-    const includedItems = rarityItems.filter(i => included.includes(i.id));
-    const availableItems = rarityItems.filter(i => !included.includes(i.id));
+    let includedItems = rarityItems.filter(i => included.includes(i.id));
+    let availableItems = rarityItems.filter(i => !included.includes(i.id));
+    
+    // 如果是UP物品选择，只显示已经在卡池物品列表中的物品
+    if (isRateUp) {
+      // @ts-ignore
+      const poolItems = formData['included_item_ids'][rarity] || [];
+      // 可用的UP物品只能是那些已经在卡池物品列表中的物品
+      availableItems = availableItems.filter(item => poolItems.includes(item.id));
+    }
     
     const searchKey = `${rarity}-${isRateUp ? 'up' : 'pool'}`;
     const searchQuery = searchQueries[searchKey] || '';

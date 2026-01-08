@@ -9,6 +9,7 @@ from typing import Dict, Any, List
 import os
 import logging
 from dataclasses import dataclass, asdict
+import uuid
 
 
 from . import PLUGIN_PATH
@@ -101,7 +102,7 @@ class CardPoolManager:
     负责卡池配置文件的加载、保存和CRUD操作
     """
     
-    def __init__(self, config_dir_path: Path(PLUGIN_PATH / "card_pool_configs")):
+    def __init__(self, config_dir_path: Path = Path(PLUGIN_PATH / "card_pool_configs")):
         """初始化卡池配置管理器
         
         参数:
@@ -124,39 +125,54 @@ class CardPoolManager:
             raise RuntimeError(f"创建配置目录失败: {e}")
     
     def load_all_configs(self) -> Dict[str, CardPoolConfig]:
-        """加载指定目录下的所有JSON配置文件到内存
+        """加载指定目录及其子目录下的所有JSON配置文件到内存
         
         返回:
-            加载的配置字典，键为配置名称（不含.json后缀），值为配置数据类实例
+            加载的配置字典，键为配置名称（相对路径，不含.json后缀），值为配置数据类实例
         """
         try:
             self._configs.clear()
             
-            # 遍历配置目录下的所有文件
-            for filename in os.listdir(self.config_dir):
-                if filename.endswith('.json'):
-                    config_name = filename[:-5]  # 移除.json后缀
-                    file_path = os.path.join(self.config_dir, filename)
-                    
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            config_data = json.load(f)
-                            # 确保cp_id存在，使用name或config_name作为默认值
-                            if 'cp_id' not in config_data:
-                                config_data['cp_id'] = config_data.get('name', config_name)
-                            # 转换为数据类实例
-                            config_instance = CardPoolConfig.from_dict(config_data)
-                            self._configs[config_name] = config_instance
-                            logger.info(f"已加载配置文件: {filename}")
-                    except json.JSONDecodeError as e:
-                        logger.error(f"JSON格式错误: {filename} - {e}")
-                        raise ValueError(f"配置文件 {filename} 格式错误: {e}")
-                    except IOError as e:
-                        logger.error(f"读取文件失败: {filename} - {e}")
-                        raise IOError(f"读取配置文件 {filename} 失败: {e}")
-                    except Exception as e:
-                        logger.error(f"处理配置文件 {filename} 失败: {e}")
-                        raise RuntimeError(f"处理配置文件 {filename} 失败: {e}")
+            # 深度扫描配置目录及其子目录
+            for root, dirs, files in os.walk(self.config_dir):
+                for filename in files:
+                    if filename.endswith('.json'):
+                        # 跳过文件名为 .json 的配置文件（即 .json 后缀前是空白字符）
+                        if filename == '.json':
+                            logger.debug(f"跳过文件名为 .json 的配置文件")
+                            continue
+                        
+                        # 计算相对于配置目录的路径
+                        full_path = os.path.join(root, filename)
+                        rel_path = os.path.relpath(full_path, self.config_dir)
+                        config_name = rel_path[:-5]  # 移除.json后缀，将路径分隔符统一为正斜杠
+                        config_name = config_name.replace('\\', '/')
+                        
+                        try:
+                            with open(full_path, 'r', encoding='utf-8') as f:
+                                config_data = json.load(f)
+                                
+                                # 跳过没有名称的卡池配置
+                                if 'name' not in config_data or not config_data['name'] or not config_data['name'].strip():
+                                    logger.warning(f"跳过没有名称的配置文件: {config_name}")
+                                    continue
+                                
+                                # 确保cp_id存在，生成唯一ID（使用更短的格式）
+                                if 'cp_id' not in config_data:
+                                    config_data['cp_id'] = uuid.uuid4().hex[:12]
+                                # 转换为数据类实例
+                                config_instance = CardPoolConfig.from_dict(config_data)
+                                self._configs[config_name] = config_instance
+                                logger.info(f"已加载配置文件: {config_name}, cp_id: {config_data['cp_id']}")
+                        except json.JSONDecodeError as e:
+                            logger.error(f"JSON格式错误: {config_name} - {e}")
+                            raise ValueError(f"配置文件 {config_name} 格式错误: {e}")
+                        except IOError as e:
+                            logger.error(f"读取文件失败: {config_name} - {e}")
+                            raise IOError(f"读取配置文件 {config_name} 失败: {e}")
+                        except Exception as e:
+                            logger.error(f"处理配置文件 {config_name} 失败: {e}")
+                            raise RuntimeError(f"处理配置文件 {config_name} 失败: {e}")
             
             logger.info(f"共加载 {len(self._configs)} 个配置文件")
             return self._configs.copy()
@@ -177,7 +193,7 @@ class CardPoolManager:
         """获取指定配置
         
         参数:
-            config_id: 配置id
+            config_id: 配置id（相对路径或cp_id）
             
         返回:
             配置数据类实例
@@ -185,10 +201,73 @@ class CardPoolManager:
         异常:
             KeyError: 配置不存在
         """
-        if config_id not in self._configs:
-            logger.error(f"配置不存在: {config_id}")
-            raise KeyError(f"配置 {config_id} 不存在")
-        return self._configs[config_id]
+        # 首先尝试通过相对路径查找
+        if config_id in self._configs:
+            return self._configs[config_id]
+        
+        # 如果没找到，尝试通过 cp_id 查找
+        for config in self._configs.values():
+            if config.cp_id == config_id:
+                return config
+        
+        logger.error(f"配置不存在: {config_id}")
+        raise KeyError(f"配置 {config_id} 不存在")
+    
+    def get_config_by_name(self, name: str) -> tuple[str, CardPoolConfig]:
+        """通过卡池名称查找配置，返回第一个匹配的配置
+        
+        参数:
+            name: 卡池名称
+            
+        返回:
+            (配置名称, 配置数据类实例) 元组
+            
+        异常:
+            KeyError: 配置不存在
+        """
+        # 遍历所有配置，按加载顺序返回第一个匹配的
+        for config_name, config in self._configs.items():
+            if config.name == name:
+                return config_name, config
+        
+        logger.error(f"找不到名称为 {name} 的卡池配置")
+        raise KeyError(f"找不到名称为 {name} 的卡池配置")
+    
+    def find_all_configs_by_name(self, name: str) -> List[tuple[str, CardPoolConfig]]:
+        """通过卡池名称查找所有匹配的配置
+        
+        参数:
+            name: 卡池名称
+            
+        返回:
+            匹配的配置列表，每个元素为 (配置名称, 配置数据类实例) 元组
+        """
+        matched_configs = []
+        for config_name, config in self._configs.items():
+            if config.name == name:
+                matched_configs.append((config_name, config))
+        
+        return matched_configs
+    
+    def get_config_by_cp_id(self, cp_id: str) -> tuple[str, CardPoolConfig]:
+        """通过 cp_id (UUID) 查找配置
+        
+        参数:
+            cp_id: 卡池ID (UUID)
+            
+        返回:
+            (配置名称, 配置数据类实例) 元组
+            
+        异常:
+            KeyError: 配置不存在
+        """
+        # 遍历所有配置，查找匹配的 cp_id
+        for config_name, config in self._configs.items():
+            if config.cp_id == cp_id:
+                return config_name, config
+        
+        logger.error(f"找不到 cp_id 为 {cp_id} 的卡池配置")
+        raise KeyError(f"找不到 cp_id 为 {cp_id} 的卡池配置")
         
     
     def add_config(self, config_id: str, config_data: Dict[str, Any]) -> CardPoolConfig:
@@ -210,6 +289,10 @@ class CardPoolManager:
             raise ValueError(f"配置 {config_id} 已存在")
         
         try:
+            # 确保cp_id存在，生成唯一ID（使用更短的格式）
+            if 'cp_id' not in config_data:
+                config_data['cp_id'] = uuid.uuid4().hex[:12]
+            
             # 创建配置数据类实例
             config_instance = CardPoolConfig.from_dict(config_data)
             
@@ -219,7 +302,7 @@ class CardPoolManager:
             # 添加到内存
             self._configs[config_id] = config_instance
             
-            logger.info(f"已添加配置: {config_id}")
+            logger.info(f"已添加配置: {config_id}, cp_id: {config_data['cp_id']}")
             return config_instance
         except Exception as e:
             logger.error(f"添加配置失败: {config_id} - {e}")
@@ -245,6 +328,10 @@ class CardPoolManager:
             raise KeyError(f"配置 {config_name} 不存在")
         
         try:
+            # 如果更新数据中没有cp_id，保留原有的cp_id
+            if 'cp_id' not in config_data:
+                config_data['cp_id'] = self._configs[config_name].cp_id
+            
             # 创建配置数据类实例
             config_instance = CardPoolConfig.from_dict(config_data)
             
@@ -254,7 +341,7 @@ class CardPoolManager:
             # 更新内存中的配置
             self._configs[config_name] = config_instance
             
-            logger.info(f"已更新配置: {config_name}")
+            logger.info(f"已更新配置: {config_name}, cp_id: {config_data['cp_id']}")
             return config_instance
         except Exception as e:
             logger.error(f"更新配置失败: {config_name} - {e}")

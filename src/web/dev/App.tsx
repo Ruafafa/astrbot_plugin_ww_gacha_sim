@@ -176,6 +176,40 @@ const addItem = async (item: Omit<GachaItem, 'id'>): Promise<number | null> => {
   }
 };
 
+const addItems = async (items: Omit<GachaItem, 'id'>[]): Promise<boolean> => {
+  console.log('addItems function called with:', items.length, 'items');
+  try {
+    // 转换为后端需要的数据结构
+    const backendItems = items.map(item => ({
+      name: item.name,
+      rarity: item.rarity,
+      type: item.type,
+      affiliated_type: item.affiliated_type, // 使用前端的affiliated_type字段
+      portrait_path: item.portrait_path,
+      config_group: item.config_group // 传递config_group参数，用于确定表名
+    }));
+    
+    console.log('Sending batch POST request to /api/db/items');
+    const response = await fetch('/api/db/items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(backendItems)
+    });
+    
+    const data = await response.json();
+    console.log('Response data:', data);
+    if (data.success) {
+      console.log('Batch items added successfully');
+      return true;
+    }
+    console.log('Batch items addition failed:', data);
+    return false;
+  } catch (error) {
+    console.error('Failed to add items:', error);
+    return false;
+  }
+};
+
 const updateItem = async (item: GachaItem): Promise<boolean> => {
   try {
     // 转换为后端需要的数据结构
@@ -323,6 +357,18 @@ const App: React.FC = () => {
     }
   };
 
+  const handleAddItems = async (items: Omit<GachaItem, 'id'>[]) => {
+    const success = await addItems(items);
+    if (success) {
+      // 重新获取物品列表
+      const fetchedItems = await fetchItems(selectedConfigGroup);
+      setItems(fetchedItems);
+      addNotification(`${language === 'zh' ? '已批量添加物品' : 'Batch added items'}: ${items.length}`);
+    } else {
+      addNotification(language === 'zh' ? '批量添加物品失败' : 'Failed to batch add items', 'error');
+    }
+  };
+
   const handleUpdateItem = async (updatedItem: GachaItem) => {
     const success = await updateItem(updatedItem);
     if (success) {
@@ -393,6 +439,7 @@ const App: React.FC = () => {
               <ItemManager 
                 items={items} 
                 onAdd={handleAddItem}
+                onAddItems={handleAddItems}
                 onUpdate={handleUpdateItem}
                 onDelete={handleDeleteItem}
                 language={language}
