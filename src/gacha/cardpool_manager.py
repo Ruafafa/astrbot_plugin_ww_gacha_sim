@@ -126,31 +126,8 @@ class CardPoolManager:
             config_dir: 配置文件所在目录
         """
         if config_dir_path is None:
-            # 获取基础数据目录
-            base_dir = Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim"))
-            
-            # 尝试修正路径：如果路径包含 'plugins'，尝试替换为 'plugin_data'
-            # 这是为了解决 StarTools 在某些情况下返回插件安装目录作为数据目录的问题
-            if "plugins" in base_dir.parts:
-                try:
-                    # 找到 plugins 的索引（从右往左找，避免匹配到上层目录的 plugins）
-                    # 但 pathlib parts 是元组，我们找最后一个匹配的
-                    idx = len(base_dir.parts) - 1 - base_dir.parts[::-1].index("plugins")
-                    
-                    # 替换为 plugin_data
-                    new_parts = list(base_dir.parts)
-                    new_parts[idx] = "plugin_data"
-                    new_base_dir = Path(*new_parts)
-                    
-                    # 如果 plugin_data 目录的父级存在（即 data 目录存在），则使用新路径
-                    # 我们不检查 new_base_dir 是否存在，因为 _ensure_dir_exists 会创建它
-                    if new_base_dir.parent.exists():
-                        base_dir = new_base_dir
-                        logger.info(f"已修正数据目录路径: {base_dir}")
-                except (ValueError, IndexError):
-                    pass
-            
-            self.config_dir = base_dir / "card_pool_configs"
+            # 使用 StarTools 获取标准数据目录
+            self.config_dir = Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim")) / "card_pool_configs"
         else:
             self.config_dir = config_dir_path
         self._configs: dict[str, CardPoolConfig] = {}  # 内存中的配置数据，键为 cp_id
@@ -166,14 +143,7 @@ class CardPoolManager:
         """初始化默认配置"""
         try:
             # 检查配置目录下是否有json文件
-            has_json = False
-            for root, dirs, files in os.walk(self.config_dir):
-                for filename in files:
-                    if filename.endswith(".json"):
-                        has_json = True
-                        break
-                if has_json:
-                    break
+            has_json = next(self.config_dir.glob("*.json"), None) is not None
             
             if has_json:
                 return
@@ -195,6 +165,37 @@ class CardPoolManager:
                     
         except Exception as e:
             logger.error(f"初始化默认配置失败: {e}")
+
+    def find_config_by_identifier(self, identifier: str) -> CardPoolConfig | None:
+        """
+        根据标识符查找卡池配置
+        
+        参数:
+            identifier: 卡池标识符（cp_id、配置文件路径或卡池名称）
+            
+        返回:
+            匹配的卡池配置，如果没有找到则返回 None
+        """
+        if not identifier:
+            return None
+            
+        # 1. 尝试直接通过 cp_id 匹配
+        if identifier in self._configs:
+            return self._configs[identifier]
+            
+        # 2. 尝试通过文件路径匹配
+        # 标准化路径分隔符，移除 .json 后缀
+        normalized_path = identifier.replace("\\", "/").replace(".json", "")
+        if normalized_path in self._file_path_to_cp_id:
+            cp_id = self._file_path_to_cp_id[normalized_path]
+            return self._configs[cp_id]
+            
+        # 3. 尝试通过名称模糊匹配
+        for config in self._configs.values():
+            if config.name == identifier:
+                return config
+                
+        return None
 
     def _ensure_dir_exists(self):
         """确保配置目录存在，不存在则创建"""

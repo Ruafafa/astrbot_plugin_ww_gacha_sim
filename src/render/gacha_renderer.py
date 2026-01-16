@@ -15,6 +15,29 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..gacha.cardpool_manager import CardPoolConfig
 
+# 布局常量配置
+class LayoutConfig:
+    # 通用
+    CARD_WIDTH = 430
+    CARD_HEIGHT = 560
+    
+    # 十连抽布局
+    H_GAP = -50  # 水平间距
+    V_GAP = 30   # 垂直间距
+    
+    # 卡池详情布局
+    DETAIL_WIDTH = 1000
+    DETAIL_PADDING = 40
+    DETAIL_LINE_HEIGHT = 50
+    DETAIL_TITLE_HEIGHT = 100
+    DETAIL_HEADER_HEIGHT = 60
+    DETAIL_ROW_HEIGHT = 40
+    
+    # 颜色配置
+    COLOR_BG = (30, 30, 30)
+    COLOR_TEXT = (255, 255, 255)
+    COLOR_ACCENT = (255, 215, 0)
+    COLOR_SUB_TEXT = (200, 200, 200)
 
 class GachaRenderer:
     """抽卡结果渲染器"""
@@ -23,23 +46,20 @@ class GachaRenderer:
         self.ui_resource_manager = ui_resource_manager
         # 确保字体目录存在
         self.font_path = self._get_font_path()
-        # 渲染参数
-        self.card_width = 430
-        self.card_height = 560
-        # 独立的横向和纵向间距属性
-        self.h_gap = -50  # 水平间距 (列与列之间的间距)
-        self.v_gap = 30  # 垂直间距 (行与行之间的间距)
+        # 渲染参数 (从配置类加载)
+        self.card_width = LayoutConfig.CARD_WIDTH
+        self.card_height = LayoutConfig.CARD_HEIGHT
+        self.h_gap = LayoutConfig.H_GAP
+        self.v_gap = LayoutConfig.V_GAP
 
     def _get_font_path(self) -> str | None:
         """获取字体路径"""
         # 优先使用插件内置字体: HYWenHei-85W.ttf
         try:
-            # 当前文件在 src/render/ 目录下
-            # 字体文件在 src/assets/font/ 目录下
-            # 获取 src 目录路径
-            current_file_path = os.path.abspath(__file__)
-            src_dir = os.path.dirname(os.path.dirname(current_file_path))
-            
+            # 使用更稳健的方式定位资源目录
+            # 假设结构是: src/render/gacha_renderer.py -> src/assets/font/HYWenHei-85W.ttf
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            src_dir = os.path.dirname(current_dir)
             font_path = os.path.join(src_dir, "assets", "font", "HYWenHei-85W.ttf")
             
             if os.path.exists(font_path):
@@ -65,10 +85,12 @@ class GachaRenderer:
 
     def render_pool_detail(self, config: "CardPoolConfig") -> Image.Image:
         """渲染卡池详细信息"""
+        # 引用布局配置
+        LC = LayoutConfig
+        
         # 基础尺寸
-        width = 1000
-        padding = 40
-        line_height = 50
+        width = LC.DETAIL_WIDTH
+        padding = LC.DETAIL_PADDING
         
         # 字体
         title_font = self._get_font(60)
@@ -77,27 +99,27 @@ class GachaRenderer:
         small_font = self._get_font(24)
         
         # 颜色
-        bg_color = (30, 30, 30)
-        text_color = (255, 255, 255)
-        accent_color = (255, 215, 0)  # 金色
-        sub_text_color = (200, 200, 200)
+        bg_color = LC.COLOR_BG
+        text_color = LC.COLOR_TEXT
+        accent_color = LC.COLOR_ACCENT
+        sub_text_color = LC.COLOR_SUB_TEXT
         
         # 预计算内容高度
         content_height = 0
         
         # 标题区域
-        content_height += 100
+        content_height += LC.DETAIL_TITLE_HEIGHT
         
         # 1. 基础信息
-        content_height += 60 # Header
-        content_height += 40 * 2 # ID, Name
+        content_height += LC.DETAIL_HEADER_HEIGHT
+        content_height += LC.DETAIL_ROW_HEIGHT * 2
         
         # 2. 概率设置
-        content_height += 60 # Header
-        content_height += 40 * 6 # 5star, 4star, 3star, up5, up4, 4role
+        content_height += LC.DETAIL_HEADER_HEIGHT
+        content_height += LC.DETAIL_ROW_HEIGHT * 6
         
         # 3. 保底机制
-        content_height += 60 # Header
+        content_height += LC.DETAIL_HEADER_HEIGHT
         content_height += 40 * 3 # 5star hard, soft, 4star hard
         
         # 4. UP物品

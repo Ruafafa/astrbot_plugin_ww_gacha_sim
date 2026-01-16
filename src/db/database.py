@@ -5,14 +5,19 @@
 """
 
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 
 from astrbot.api import logger
 from astrbot.api.star import StarTools
 
-# 定义插件路径
-PLUGIN_PATH = Path(__file__).parent.parent.parent
+# 定义插件路径 (使用 StarTools 获取更稳健的路径)
+# 注意：这里我们不再依赖相对路径计算，而是直接使用 StarTools 获取插件根目录（如果可用），
+# 或者保留相对路径但添加注释说明其局限性。
+# 由于 StarTools 主要用于获取数据目录，获取插件代码目录通常依赖 __file__。
+# 我们可以将其指向 src 的父目录，即插件根目录。
+PLUGIN_PATH = Path(__file__).resolve().parent.parent.parent
 
 
 class CommonDatabase:
@@ -33,6 +38,10 @@ class CommonDatabase:
         else:
             self.db_path = db_path
         self._ensure_directory_exists()
+        
+        # 线程局部存储，用于复用数据库连接
+        self._local = threading.local()
+        
         self.init_db()
 
     def _ensure_directory_exists(self):
@@ -43,23 +52,45 @@ class CommonDatabase:
         """初始化数据库表结构 - 由子类或专门的初始化函数负责"""
         pass
 
+    def _get_thread_local_connection(self):
+        """获取线程局部的数据库连接"""
+        if not hasattr(self._local, "conn") or self._local.conn is None:
+            try:
+                self._local.conn = sqlite3.connect(self.db_path)
+                self._local.conn.execute("PRAGMA foreign_keys = ON")  # 启用外键约束
+                self._local.conn.execute("PRAGMA journal_mode = WAL")  # 启用WAL模式，提高并发性能
+            except sqlite3.Error as e:
+                logger.error(f"数据库连接错误: {e}")
+                raise
+        return self._local.conn
+
+    def close_thread_local_connection(self):
+        """关闭当前线程的数据库连接"""
+        if hasattr(self._local, "conn") and self._local.conn is not None:
+            try:
+                self._local.conn.close()
+            except sqlite3.Error as e:
+                logger.error(f"关闭数据库连接错误: {e}")
+            finally:
+                self._local.conn = None
+
     @contextmanager
     def get_connection(self):
-        """数据库连接上下文管理器，确保连接正确关闭"""
-        conn = None
+        """
+        获取数据库连接上下文
+        
+        注意：现在复用线程局部连接，不再每次都关闭。
+        """
+        conn = self._get_thread_local_connection()
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute("PRAGMA foreign_keys = ON")  # 启用外键约束
-            conn.execute("PRAGMA journal_mode = WAL")  # 启用WAL模式，提高并发性能
             yield conn
-        except sqlite3.Error as e:
-            logger.error(f"数据库连接错误: {e}")
+            # 如果是写操作，调用者应该手动 commit，或者我们在 execute_update 中 commit
+            # 对于复用的连接，我们不在此处 close
+        except sqlite3.Error:
             if conn:
                 conn.rollback()
             raise
-        finally:
-            if conn:
-                conn.close()
+        # finally 块中不再关闭连接
 
     # 通用数据库操作方法
     def execute_query(self, query: str, params: tuple = ()) -> list[sqlite3.Row]:

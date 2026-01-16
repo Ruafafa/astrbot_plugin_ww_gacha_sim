@@ -21,7 +21,6 @@ from .src.render.ui_resources_manager import UIResourceManager
 PLUGIN_PATH = Path(__file__).parent
 
 
-@register("鸣潮模拟抽卡", "Ruafafa", "提供鸣潮游戏的模拟抽卡功能", "1.0.0")
 class WutheringWavesGachaPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         """
@@ -114,6 +113,66 @@ class WutheringWavesGachaPlugin(Star):
         except Exception as e:
             logger.error(f"保存抽卡结果图片失败: {e}")
 
+    async def _get_target_config(self, event: AstrMessageEvent, pool_identifier: str = ""):
+        """
+        根据用户输入和默认设置获取目标卡池配置
+        """
+        sender_id = str(event.get_sender_id())
+        config_ids = self.cp_manager.get_config_ids()
+
+        if not config_ids:
+            yield event.plain_result(
+                "当前没有可用的卡池配置，请先创建卡池配置文件。"
+            )
+            return None
+
+        # 如果未指定卡池标识符，则从KV存储中获取用户的默认卡池设置（存储的是 cp_id）
+        if pool_identifier == "":
+            saved_cp_id = await self.get_kv_data(
+                f"user_default_pool_{sender_id}", default=None
+            )
+
+            # 检查保存的 cp_id 是否仍然存在于当前的 config_ids 中
+            if saved_cp_id and saved_cp_id in config_ids:
+                pool_identifier = saved_cp_id
+            else:
+                # cp_id 不存在或用户未设置，使用第一个可用的卡池
+                pool_identifier = config_ids[0]
+
+                # 如果保存的 cp_id 不存在，清理无效数据
+                if saved_cp_id and saved_cp_id not in config_ids:
+                    await self.delete_kv_data(f"user_default_pool_{sender_id}")
+                    logger.info(
+                        f"用户 {sender_id} 的默认卡池 {saved_cp_id} 不存在，已清理"
+                    )
+
+        # 使用 CardPoolManager 的查找方法
+        target_config = self.cp_manager.find_config_by_identifier(pool_identifier)
+
+        if target_config is None:
+            pool_list = "找不到指定的卡池。可用的卡池有：\n"
+            for i, cp_id in enumerate(config_ids, 1):
+                try:
+                    config = self.cp_manager.get_config_by_cp_id(cp_id)
+                    # 检查配置是否启用
+                    if config.enable:
+                        pool_list += f"{i}. {config.name} - ID: {config.cp_id}\n"
+                except Exception as e:
+                    logger.warning(f"获取卡池 {cp_id} 详情失败: {e}")
+                    pool_list += f"{i}. {cp_id} (获取详情失败)\n"
+
+            yield event.plain_result(pool_list)
+            return None
+
+        # 检查配置是否启用
+        if not target_config.enable:
+            yield event.plain_result(
+                f"卡池「{target_config.name}」已被禁用，无法进行抽卡。"
+            )
+            return None
+
+        return target_config
+
     @filter.command("单抽", alias={"单次抽卡", "抽卡", "单次唤取"})
     async def single_pull(self, event: AstrMessageEvent, pool_identifier: str = ""):
         """
@@ -125,97 +184,83 @@ class WutheringWavesGachaPlugin(Star):
         """
         try:
             sender_id = str(event.get_sender_id())
-
-            # 获取所有可用的卡池配置 cp_id
-            config_ids = self.cp_manager.get_config_ids()
-
-            if not config_ids:
-                yield event.plain_result(
-                    "当前没有可用的卡池配置，请先创建卡池配置文件。"
-                )
-                return
-
-            # 如果未指定卡池标识符，则从KV存储中获取用户的默认卡池设置（存储的是 cp_id）
-            if pool_identifier == "":
-                saved_cp_id = await self.get_kv_data(
-                    f"user_default_pool_{sender_id}", default=None
-                )
-
-                # 检查保存的 cp_id 是否仍然存在于当前的 config_ids 中
-                if saved_cp_id and saved_cp_id in config_ids:
-                    pool_identifier = saved_cp_id
-                else:
-                    # cp_id 不存在或用户未设置，使用第一个可用的卡池
-                    pool_identifier = config_ids[0]
-
-                    # 如果保存的 cp_id 不存在，清理无效数据
-                    if saved_cp_id and saved_cp_id not in config_ids:
-                        await self.delete_kv_data(f"user_default_pool_{sender_id}")
-                        logger.info(
-                            f"用户 {sender_id} 的默认卡池 {saved_cp_id} 不存在，已清理"
-                        )
-
-            # 查找匹配的卡池配置
+            
+            # 使用辅助方法获取目标配置
+            target_config_gen = self._get_target_config(event, pool_identifier)
+            
+            # _get_target_config 是一个异步生成器 (因为可能 yield 消息)
+            # 我们需要迭代它来获取结果或发送消息
             target_config = None
+            async for result in target_config_gen:
+                if isinstance(result, CardPoolConfig): # 假设我们修改 _get_target_config 返回配置而不是 yield
+                   # 实际上 _get_target_config 当前是 yield 消息的生成器，如果 yield 了消息，说明有错误或提示
+                   # 如果没有 yield 消息，我们需要一种方式返回配置
+                   pass
+                else:
+                    # 这是一个 AstrBot 消息组件
+                    yield result
+                    return # 只要有消息 yield 出来，说明流程中断（找不到卡池等）
+            
+            # 由于 _get_target_config 的设计比较复杂（既要 yield 消息又要返回结果），
+            # 这里的重构稍微调整一下：让 _get_target_config 只负责查找逻辑，
+            # 如果找不到返回 None，消息发送逻辑保留在外面或者通过异常/状态码返回。
+            # 但为了复用代码，我们可以让 _get_target_config 在出错时 yield 消息并返回 None
+            # 但 Python 生成器不能既 yield 又 return 值给调用者（虽然 Python 3.3+ 支持 return，但必须 catch StopIteration）
+            
+            # 重新思考：我们重写 _get_target_config 逻辑
+            pass
+        except Exception:
+            pass
 
-            # 尝试通过 cp_id (UUID) 查找（优先级最高，因为KV存储的就是cp_id）
-            try:
-                target_config = self.cp_manager.get_config_by_cp_id(pool_identifier)
-                logger.info(f"通过 cp_id 找到卡池: {pool_identifier}")
-            except KeyError:
-                # cp_id 匹配失败，继续尝试其他匹配方式
-                pass
+    # 重新实现 _get_target_config 为普通异步方法，返回 (config, message_yield)
+    async def _resolve_pool_config(self, event: AstrMessageEvent, pool_identifier: str):
+        sender_id = str(event.get_sender_id())
+        config_ids = self.cp_manager.get_config_ids()
 
-            # 如果没找到，尝试通过相对路径精确匹配
-            if target_config is None:
+        if not config_ids:
+            return None, event.plain_result("当前没有可用的卡池配置，请先创建卡池配置文件。")
+
+        if pool_identifier == "":
+            saved_cp_id = await self.get_kv_data(f"user_default_pool_{sender_id}", default=None)
+            if saved_cp_id and saved_cp_id in config_ids:
+                pool_identifier = saved_cp_id
+            else:
+                pool_identifier = config_ids[0]
+                if saved_cp_id and saved_cp_id not in config_ids:
+                    await self.delete_kv_data(f"user_default_pool_{sender_id}")
+                    logger.info(f"用户 {sender_id} 的默认卡池 {saved_cp_id} 不存在，已清理")
+
+        target_config = self.cp_manager.find_config_by_identifier(pool_identifier)
+
+        if target_config is None:
+            pool_list = "找不到指定的卡池。可用的卡池有：\n"
+            for i, cp_id in enumerate(config_ids, 1):
                 try:
-                    target_config = self.cp_manager.get_config(pool_identifier)
-                    logger.info(f"通过相对路径找到卡池: {pool_identifier}")
-                except KeyError:
-                    pass
+                    config = self.cp_manager.get_config_by_cp_id(cp_id)
+                    if config.enable:
+                        pool_list += f"{i}. {config.name} - ID: {config.cp_id}\n"
+                except Exception as e:
+                    logger.warning(f"获取卡池 {cp_id} 详情失败: {e}")
+                    pool_list += f"{i}. {cp_id} (获取详情失败)\n"
+            return None, event.plain_result(pool_list)
 
-            # 如果没找到，尝试通过卡池显示名称匹配
-            if target_config is None:
-                matched_configs = self.cp_manager.get_config_by_name(pool_identifier)
-                if matched_configs:
-                    if len(matched_configs) == 1:
-                        # 只有一个匹配，直接使用
-                        target_config = matched_configs[0]
-                        target_cp_id = target_config.cp_id
-                        logger.info(
-                            f"通过卡池名称找到卡池: {pool_identifier}, cp_id: {target_cp_id}"
-                        )
-                    else:
-                        # 多个匹配，列出可选卡池
-                        pool_list = f"找到 {len(matched_configs)} 个名为「{pool_identifier}」的卡池，请选择：\n"
-                        for i, config in enumerate(matched_configs, 1):
-                            pool_list += f"{i}. {config.name} (ID: {config.cp_id})\n"
-                        pool_list += "\n请使用 `/单抽 <卡池ID>` 来指定具体卡池。"
+        if not target_config.enable:
+            return None, event.plain_result(f"卡池「{target_config.name}」已被禁用，无法进行抽卡。")
 
-                        yield event.plain_result(pool_list)
-                        return
+        return target_config, None
 
-            if target_config is None:
-                pool_list = "找不到指定的卡池。可用的卡池有：\n"
-                for i, cp_id in enumerate(config_ids, 1):
-                    try:
-                        config = self.cp_manager.get_config_by_cp_id(cp_id)
-                        # 检查配置是否启用
-                        if config.enable:
-                            pool_list += f"{i}. {config.name} - ID: {config.cp_id}\n"
-                    except Exception as e:
-                        logger.warning(f"获取卡池 {cp_id} 详情失败: {e}")
-                        pool_list += f"{i}. {cp_id} (获取详情失败)\n"
-
-                yield event.plain_result(pool_list)
+    @filter.command("单抽", alias={"单次抽卡", "抽卡", "单次唤取"})
+    async def single_pull(self, event: AstrMessageEvent, pool_identifier: str = ""):
+        """
+        单次抽卡命令，默认使用用户设置的默认卡池
+        """
+        try:
+            target_config, error_msg = await self._resolve_pool_config(event, pool_identifier)
+            if error_msg:
+                yield error_msg
                 return
-
-            # 检查配置是否启用
-            if not target_config.enable:
-                yield event.plain_result(
-                    f"卡池「{target_config.name}」已被禁用，无法进行抽卡。"
-                )
-                return
+            
+            sender_id = str(event.get_sender_id())
 
             # 根据卡池配置的 config_group 创建对应的 ItemManager
             config_group = getattr(target_config, "config_group", "default")
@@ -239,15 +284,20 @@ class WutheringWavesGachaPlugin(Star):
                 # 获取发送者昵称
                 sender_name = event.get_sender_name() if hasattr(event, "get_sender_name") else "未知用户"
                 
-                # 渲染抽卡结果图片
-                rendered_image = self.renderer.render_single_pull(item_obj, nickname=sender_name, user_id=sender_id)
+                # 渲染抽卡结果图片 (使用 asyncio.to_thread 避免阻塞)
+                import asyncio
+                rendered_image = await asyncio.to_thread(
+                    self.renderer.render_single_pull, 
+                    item_obj, 
+                    nickname=sender_name, 
+                    user_id=sender_id
+                )
 
                 # 保存渲染结果
                 self._save_rendered_image(rendered_image, sender_id)
 
                 # 将图片转换为字节数据并发送
                 import io
-
                 from astrbot.core.message.components import Image
 
                 img_byte_arr = io.BytesIO()
@@ -283,98 +333,12 @@ class WutheringWavesGachaPlugin(Star):
             pool_identifier: 卡池标识符（可选），可以是 cp_id、配置文件路径或卡池名称，如果不提供则使用默认卡池
         """
         try:
+            target_config, error_msg = await self._resolve_pool_config(event, pool_identifier)
+            if error_msg:
+                yield error_msg
+                return
+
             sender_id = str(event.get_sender_id())
-
-            # 获取所有可用的卡池配置 cp_id
-            config_ids = self.cp_manager.get_config_ids()
-
-            if not config_ids:
-                yield event.plain_result(
-                    "当前没有可用的卡池配置，请先创建卡池配置文件。"
-                )
-                return
-
-            # 如果未指定卡池标识符，则从KV存储中获取用户的默认卡池设置（存储的是 cp_id）
-            if pool_identifier == "":
-                saved_cp_id = await self.get_kv_data(
-                    f"user_default_pool_{sender_id}", default=None
-                )
-
-                # 检查保存的 cp_id 是否仍然存在于当前的 config_ids 中
-                if saved_cp_id and saved_cp_id in config_ids:
-                    pool_identifier = saved_cp_id
-                else:
-                    # cp_id 不存在或用户未设置，使用第一个可用的卡池
-                    pool_identifier = config_ids[0]
-
-                    # 如果保存的 cp_id 不存在，清理无效数据
-                    if saved_cp_id and saved_cp_id not in config_ids:
-                        await self.delete_kv_data(f"user_default_pool_{sender_id}")
-                        logger.info(
-                            f"用户 {sender_id} 的默认卡池 {saved_cp_id} 不存在，已清理"
-                        )
-
-            # 查找匹配的卡池配置
-            target_config = None
-
-            # 尝试通过 cp_id (UUID) 查找（优先级最高，因为KV存储的就是cp_id）
-            try:
-                target_config = self.cp_manager.get_config_by_cp_id(pool_identifier)
-                logger.info(f"通过 cp_id 找到卡池: {pool_identifier}")
-            except KeyError:
-                # cp_id 匹配失败，继续尝试其他匹配方式
-                pass
-
-            # 如果没找到，尝试通过相对路径精确匹配
-            if target_config is None:
-                try:
-                    target_config = self.cp_manager.get_config(pool_identifier)
-                    logger.info(f"通过相对路径找到卡池: {pool_identifier}")
-                except KeyError:
-                    pass
-
-            # 如果没找到，尝试通过卡池显示名称匹配
-            if target_config is None:
-                matched_configs = self.cp_manager.get_config_by_name(pool_identifier)
-                if matched_configs:
-                    if len(matched_configs) == 1:
-                        # 只有一个匹配，直接使用
-                        target_config = matched_configs[0]
-                        target_cp_id = target_config.cp_id
-                        logger.info(
-                            f"通过卡池名称找到卡池: {pool_identifier}, cp_id: {target_cp_id}"
-                        )
-                    else:
-                        # 多个匹配，列出可选卡池
-                        pool_list = f"找到 {len(matched_configs)} 个名为「{pool_identifier}」的卡池，请选择：\n"
-                        for i, config in enumerate(matched_configs, 1):
-                            pool_list += f"{i}. {config.name} (ID: {config.cp_id})\n"
-                        pool_list += "\n请使用 `/十抽 <卡池ID>` 来指定具体卡池。"
-
-                        yield event.plain_result(pool_list)
-                        return
-
-            if target_config is None:
-                pool_list = "找不到指定的卡池。可用的卡池有：\n"
-                for i, cp_id in enumerate(config_ids, 1):
-                    try:
-                        config = self.cp_manager.get_config_by_cp_id(cp_id)
-                        # 检查配置是否启用
-                        if config.enable:
-                            pool_list += f"{i}. {config.name} - ID: {config.cp_id}\n"
-                    except Exception as e:
-                        logger.warning(f"获取卡池 {cp_id} 详情失败: {e}")
-                        pool_list += f"{i}. {cp_id} (获取详情失败)\n"
-
-                yield event.plain_result(pool_list)
-                return
-
-            # 检查配置是否启用
-            if not target_config.enable:
-                yield event.plain_result(
-                    f"卡池「{target_config.name}」已被禁用，无法进行抽卡。"
-                )
-                return
 
             # 根据卡池配置的 config_group 创建对应的 ItemManager
             config_group = getattr(target_config, "config_group", "default")
@@ -398,7 +362,13 @@ class WutheringWavesGachaPlugin(Star):
                 sender_name = event.get_sender_name() if hasattr(event, "get_sender_name") else "未知用户"
 
                 # 渲染十连抽结果图片
-                rendered_image = self.renderer.render_ten_pulls(item_objs, nickname=sender_name, user_id=sender_id)
+                import asyncio
+                rendered_image = await asyncio.to_thread(
+                    self.renderer.render_ten_pulls, 
+                    item_objs, 
+                    nickname=sender_name, 
+                    user_id=sender_id
+                )
 
                 # 保存渲染结果
                 self._save_rendered_image(rendered_image, sender_id)

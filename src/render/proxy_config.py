@@ -51,7 +51,21 @@ class ProxyConfig:
             auth_part = f"{username}:{password}@"
             self.proxy_url = f"{parsed.scheme}://{auth_part}{parsed.netloc}"
 
-        logger.info(f"设置代理: {self.proxy_url}")
+        # 记录日志时对密码进行脱敏
+        log_url = self.proxy_url
+        if "@" in log_url:
+            from urllib.parse import urlparse
+            try:
+                parsed = urlparse(log_url)
+                if parsed.password:
+                    # 替换密码部分为 ***
+                    netloc = parsed.netloc.replace(f":{parsed.password}@", ":***@")
+                    log_url = parsed._replace(netloc=netloc).geturl()
+            except Exception:
+                # 解析失败，使用简单替换
+                pass
+                
+        logger.info(f"设置代理: {log_url}")
 
     def disable_proxy(self):
         """禁用代理"""

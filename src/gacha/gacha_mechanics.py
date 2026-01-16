@@ -94,7 +94,12 @@ class GachaMechanics:
         final_prob = pool_config.probability_settings.get("base_5star_rate", 0.008)
 
         # 1. 软保区间按起始位置排序（防止 JSON 数据乱序）
-        sorted_pity = pool_config.probability_progression["5star"]["soft_pity"]
+        sorted_pity = pool_config.probability_progression["5star"].get("soft_pity", [])
+        if not sorted_pity:
+            # 如果配置缺失或为空，仅返回基础概率（防止崩溃，但可能不符合预期）
+            # 实际上硬保底逻辑在上面已经处理了，所以这里返回基础概率是安全的兜底
+            return min(final_prob, 1.0)
+            
         sorted_pity = sorted(sorted_pity, key=lambda x: x["start_pull"])
 
         # 2. 遍历每一个区间

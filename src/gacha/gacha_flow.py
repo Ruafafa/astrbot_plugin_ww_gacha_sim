@@ -183,8 +183,16 @@ class GachaFlow:
 
         # 执行十次抽卡，但跳过单次数据库操作以提高性能
         try:
+            retry_count = 0
+            max_retries = 20  # 最大尝试次数，避免死循环（正常只需要10次，多给10次作为容错）
+            
             # 确保获取到10个物品
             while len(items) < 10:
+                retry_count += 1
+                if retry_count > max_retries:
+                    logger.error(f"十连抽卡重试次数过多 ({max_retries})，可能存在配置错误或物品缺失")
+                    break
+                    
                 try:
                     # 直接调用execute_pull，跳过pull方法中的数据库操作
                     (
