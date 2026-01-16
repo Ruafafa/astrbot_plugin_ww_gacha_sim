@@ -5,13 +5,11 @@
 """
 
 import concurrent.futures
-import logging
+import json
 from typing import Any
 
+from astrbot.api import logger
 from .database import CommonDatabase
-
-# 配置日志
-logger = logging.getLogger(__name__)
 
 
 class GachaDBOperations:

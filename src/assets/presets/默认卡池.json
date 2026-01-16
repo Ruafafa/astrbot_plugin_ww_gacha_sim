@@ -1,7 +1,53 @@
 {
-  "enable": true,
-  "config_group": "default",
   "cp_id": "fd571cd10578",
+  "name": "默认卡池",
+  "probability_settings": {
+    "base_3star_rate": 0.932,
+    "base_4star_rate": 0.06,
+    "base_5star_rate": 0.008,
+    "four_star_character_rate": 0.5,
+    "up_4star_rate": 0.8,
+    "up_5star_rate": 0
+  },
+  "rate_up_item_ids": {
+    "3star": [],
+    "4star": [
+      "cha_散华_4888",
+      "cha_白芷_5511",
+      "cha_釉瑚_6253",
+      "cha_炽霞_1cba",
+      "cha_莫特斐_bcd0",
+      "cha_渊武_55e4",
+      "cha_灯灯_c425",
+      "cha_卜灵_c0f9",
+      "cha_秋水_1b68",
+      "cha_秧秧_400c",
+      "cha_丹瑾_6d1d",
+      "cha_桃祈_19b5",
+      "wea_异响空灵_5f37",
+      "wea_永夜长明_76bf",
+      "wea_东落_1962",
+      "wea_凋亡频移_1e77",
+      "wea_行进序曲_f511",
+      "wea_不归孤军_0160",
+      "wea_西升_eda7",
+      "wea_永续坍缩_bbae",
+      "wea_华彩乐段_2af2",
+      "wea_无眠烈火_f37d",
+      "wea_飞逝_dace",
+      "wea_悖论喷流_b977",
+      "wea_呼啸重音_2716",
+      "wea_袍泽之固_2ed1",
+      "wea_骇行_1392",
+      "wea_尘云旋臂_866b",
+      "wea_暗夜矩阵·暝光_af11",
+      "wea_奇幻变奏_cb77",
+      "wea_今州守望_fa3e",
+      "wea_异度_3042",
+      "wea_核熔星盘_8c7b"
+    ],
+    "5star": []
+  },
   "included_item_ids": {
     "3star": [
       "wea_暗夜长刃·玄明_75d8",
@@ -122,7 +168,6 @@
       "wea_幽冥的忘忧章_704e"
     ]
   },
-  "name": "默认卡池",
   "probability_progression": {
     "4star": {
       "hard_pity_pull": 10,
@@ -151,51 +196,6 @@
       ]
     }
   },
-  "probability_settings": {
-    "base_3star_rate": 0.932,
-    "base_4star_rate": 0.06,
-    "base_5star_rate": 0.008,
-    "four_star_character_rate": 0.5,
-    "up_4star_rate": 0.8,
-    "up_5star_rate": 0
-  },
-  "rate_up_item_ids": {
-    "3star": [],
-    "4star": [
-      "cha_散华_4888",
-      "cha_白芷_5511",
-      "cha_釉瑚_6253",
-      "cha_炽霞_1cba",
-      "cha_莫特斐_bcd0",
-      "cha_渊武_55e4",
-      "cha_灯灯_c425",
-      "cha_卜灵_c0f9",
-      "cha_秋水_1b68",
-      "cha_秧秧_400c",
-      "cha_丹瑾_6d1d",
-      "cha_桃祈_19b5",
-      "wea_异响空灵_5f37",
-      "wea_永夜长明_76bf",
-      "wea_东落_1962",
-      "wea_凋亡频移_1e77",
-      "wea_行进序曲_f511",
-      "wea_不归孤军_0160",
-      "wea_西升_eda7",
-      "wea_永续坍缩_bbae",
-      "wea_华彩乐段_2af2",
-      "wea_无眠烈火_f37d",
-      "wea_飞逝_dace",
-      "wea_悖论喷流_b977",
-      "wea_呼啸重音_2716",
-      "wea_袍泽之固_2ed1",
-      "wea_骇行_1392",
-      "wea_尘云旋臂_866b",
-      "wea_暗夜矩阵·暝光_af11",
-      "wea_奇幻变奏_cb77",
-      "wea_今州守望_fa3e",
-      "wea_异度_3042",
-      "wea_核熔星盘_8c7b"
-    ],
-    "5star": []
-  }
+  "config_group": "default",
+  "enable": true
 }

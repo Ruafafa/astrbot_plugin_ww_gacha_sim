@@ -3,17 +3,11 @@
 针对国内网络环境优化资源访问
 """
 
-import logging
 import time
 from urllib.parse import urlparse
 
 import httpx
-
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 class ResourceLoader:

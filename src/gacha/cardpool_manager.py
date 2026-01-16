@@ -7,19 +7,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import os
+import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from . import PLUGIN_PATH
+from astrbot.api import logger
+from astrbot.api.star import StarTools
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+from . import PLUGIN_PATH
 
 
 @dataclass
@@ -124,19 +121,58 @@ class CardPoolManager:
     负责卡池配置文件的加载、保存和CRUD操作
     """
 
-    def __init__(self, config_dir_path: Path = Path(PLUGIN_PATH / "card_pool_configs")):
+    def __init__(self, config_dir_path: Path | None = None):
         """初始化卡池配置管理器
 
         参数:
             config_dir: 配置文件所在目录
         """
-        self.config_dir = config_dir_path
+        if config_dir_path is None:
+            self.config_dir = Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim")) / "card_pool_configs"
+        else:
+            self.config_dir = config_dir_path
         self._configs: dict[str, CardPoolConfig] = {}  # 内存中的配置数据，键为 cp_id
         self._file_path_to_cp_id: dict[str, str] = {}  # 文件路径到 cp_id 的映射
         # 确保配置目录存在
         self._ensure_dir_exists()
+        # 初始化默认配置
+        self._init_default_configs()
         # 加载所有配置文件到内存
         self.load_all_configs()
+
+    def _init_default_configs(self):
+        """初始化默认配置"""
+        try:
+            # 检查配置目录下是否有json文件
+            has_json = False
+            for root, dirs, files in os.walk(self.config_dir):
+                for filename in files:
+                    if filename.endswith(".json"):
+                        has_json = True
+                        break
+                if has_json:
+                    break
+            
+            if has_json:
+                return
+
+            logger.info("检测到配置目录为空，正在初始化默认卡池配置...")
+            
+            # 预置配置目录
+            presets_dir = Path(__file__).parent.parent / "assets" / "presets"
+            
+            if not presets_dir.exists():
+                logger.warning(f"预置配置目录不存在: {presets_dir}")
+                return
+
+            # 复制所有预置文件到配置目录
+            for item in presets_dir.iterdir():
+                if item.is_file() and item.suffix == ".json":
+                    shutil.copy2(item, self.config_dir / item.name)
+                    logger.info(f"已复制预置配置: {item.name}")
+                    
+        except Exception as e:
+            logger.error(f"初始化默认配置失败: {e}")
 
     def _ensure_dir_exists(self):
         """确保配置目录存在，不存在则创建"""

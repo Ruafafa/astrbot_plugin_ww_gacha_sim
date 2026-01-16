@@ -3,7 +3,7 @@ from pathlib import Path
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star, register, StarTools
 
 from .src.db.database import CommonDatabase
 from .src.db.gacha_db_operations import GachaDBOperations
@@ -65,17 +65,20 @@ class WutheringWavesGachaPlugin(Star):
 
         # 初始化抽卡
         self.gacha_mechanics = GachaMechanics(self.item_manager)
-        config_storage_path = self.config.get(
-            "config_storage_path", "./card_pool_configs"
-        )
-        config_storage_path = Path(config_storage_path)
-        if not config_storage_path.is_absolute():
-            config_storage_path = PLUGIN_PATH / config_storage_path
+        config_storage_path = self.config.get("config_storage_path")
+        
+        if config_storage_path:
+            config_storage_path = Path(config_storage_path)
+            if not config_storage_path.is_absolute():
+                config_storage_path = PLUGIN_PATH / config_storage_path
+        else:
+            config_storage_path = None
+            
         self.cp_manager = CardPoolManager(config_storage_path)
 
         # 其他设置
         self.save_rendered_results = self.config.get("save_rendered_results", False)
-        self.render_output_path = self.config.get("render_output_path", "./rendered_results")
+        self.render_output_path = self.config.get("render_output_path")
 
         # 初始化插件所需的各种组件
         # 例如：数据库连接、配置管理器等
@@ -95,12 +98,15 @@ class WutheringWavesGachaPlugin(Star):
         try:
             # 获取输出路径配置
             output_path_str = self.render_output_path
-            output_path = Path(output_path_str)
             
-            # 处理相对路径
-            if not output_path.is_absolute():
-                # 相对于插件目录
-                output_path = PLUGIN_PATH / output_path
+            if output_path_str:
+                output_path = Path(output_path_str)
+                # 处理相对路径
+                if not output_path.is_absolute():
+                    # 相对于插件目录
+                    output_path = PLUGIN_PATH / output_path
+            else:
+                output_path = Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim")) / "rendered_results"
             
             # 确保目录存在
             output_path.mkdir(parents=True, exist_ok=True)

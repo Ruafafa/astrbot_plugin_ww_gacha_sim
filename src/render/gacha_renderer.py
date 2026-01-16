@@ -3,10 +3,10 @@
 负责实现抽卡结果的可视化渲染
 """
 
-import logging
 import os
 
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+from astrbot.api import logger
 
 from ..item_data.item_manager import Item
 from .ui_resources_manager import UIResourceManager
@@ -14,9 +14,6 @@ from .ui_resources_manager import UIResourceManager
 from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..gacha.cardpool_manager import CardPoolConfig
-
-# 配置日志
-logger = logging.getLogger(__name__)
 
 
 class GachaRenderer:
@@ -51,17 +48,6 @@ class GachaRenderer:
                 logger.warning(f"内置字体文件不存在: {font_path}")
         except Exception as e:
             logger.warning(f"计算字体路径出错: {e}")
-
-        # 如果内置字体不可用，尝试系统字体作为后备
-        font_paths = [
-            "C:/Windows/Fonts/simhei.ttf",  # 黑体
-            "C:/Windows/Fonts/msyh.ttc",  # 微软雅黑
-            "C:/Windows/Fonts/simsun.ttc",  # 宋体
-        ]
-
-        for path in font_paths:
-            if os.path.exists(path):
-                return path
 
         # 如果找不到中文字体，返回None（后续会使用默认字体）
         return None

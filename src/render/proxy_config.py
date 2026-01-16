@@ -3,10 +3,8 @@
 负责管理网络代理设置，支持HTTP/HTTPS代理
 """
 
-import logging
 from typing import Any
-
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 class ProxyConfig:

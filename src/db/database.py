@@ -4,14 +4,12 @@
 只包含基本的、业务无关的数据库操作方法
 """
 
-import logging
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
+from astrbot.api.star import StarTools
 
 # 定义插件路径
 PLUGIN_PATH = Path(__file__).parent.parent.parent
@@ -22,10 +20,7 @@ class CommonDatabase:
 
     def __init__(
         self,
-        db_path: Path = PLUGIN_PATH.parent.parent
-        / "plugin_data"
-        / "astrbot_plugin_ww_gacha_sim"
-        / "ww_gacha_sim_data.db",
+        db_path: Path | None = None,
     ):
         """
         初始化数据库连接
@@ -33,7 +28,10 @@ class CommonDatabase:
         Args:
             db_path: 数据库文件路径
         """
-        self.db_path = db_path
+        if db_path is None:
+            self.db_path = Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim")) / "ww_gacha_sim_data.db"
+        else:
+            self.db_path = db_path
         self._ensure_directory_exists()
         self.init_db()
 

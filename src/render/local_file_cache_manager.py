@@ -1,22 +1,21 @@
 import hashlib
 import json
-import logging
 import threading
 import time
 from pathlib import Path
 
 from PIL import Image
+from astrbot.api import logger
+from astrbot.api.star import StarTools
 
 from . import PLUGIN_PATH
-
-logger = logging.getLogger(__name__)
 
 
 class LocalFileCacheManager:
     """本地文件缓存管理器"""
 
     def __init__(
-        self, cache_dir: Path = Path(PLUGIN_PATH / "cache"), cleanup_interval: int = 24
+        self, cache_dir: Path | None = None, cleanup_interval: int = 24
     ):
         """
         初始化缓存管理器
@@ -25,7 +24,10 @@ class LocalFileCacheManager:
             cache_dir: 缓存目录路径
             cleanup_interval: 缓存清理周期（单位：小时），默认24小时
         """
-        self.cache_dir = cache_dir
+        if cache_dir is None:
+            self.cache_dir = Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim")) / "cache"
+        else:
+            self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.meta_file = self.cache_dir / "cache_meta.json"
         self.cleanup_interval = cleanup_interval * 3600  # 转换为秒

@@ -3,16 +3,14 @@
 实现抽卡流程控制逻辑，包括用户状态管理、抽卡执行和结果统计
 """
 
-import logging
 from datetime import datetime
 from typing import Any
 
+from astrbot.api import logger
 from ..db.gacha_db_operations import GachaDBOperations
 from ..item_data.item_manager import Item, ItemManager
 from .cardpool_manager import CardPoolConfig
 from .gacha_mechanics import GachaMechanics
-
-logger = logging.getLogger(__name__)
 
 
 class GachaFlow:

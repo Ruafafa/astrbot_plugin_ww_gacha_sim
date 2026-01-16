@@ -3,13 +3,10 @@
 负责从数据库加载物品数据并提供物品数据管理功能，包括角色和武器
 """
 
-import logging
 from typing import Any
 
+from astrbot.api import logger
 from .database import CommonDatabase
-
-# 配置日志
-logger = logging.getLogger(__name__)
 
 
 class ItemDBOperations:
@@ -97,8 +94,9 @@ class ItemDBOperations:
 
             # CSV文件路径
             csv_path = (
-                Path(__file__).parent.parent.parent
-                / "card_pool_configs"
+                Path(__file__).parent.parent
+                / "assets"
+                / "data"
                 / "default.csv"
             )
 
