@@ -23,12 +23,6 @@
     "hint": "抽卡结果图片的保存目录路径",
     "default": "./rendered_results"
   },
-  "config_storage_path": {
-    "description": "卡池配置文件存储路径",
-    "type": "string",
-    "hint": "卡池配置文件的存储目录路径",
-    "default": "./card_pool_configs"
-  },
   "cache_cleanup_interval": {
     "description": "资源缓存清理周期",
     "type": "int",

@@ -1,6 +1,5 @@
 import argparse
 import json
-import logging
 import os
 import sys
 import webbrowser
@@ -9,15 +8,11 @@ from threading import Timer
 from typing import Any
 from wsgiref.simple_server import make_server
 
+from astrbot.api import logger
+from astrbot.api.star import StarTools
 from flask import Flask, Response, jsonify, make_response, request, send_from_directory
 from flask_cors import CORS
 from pydantic import BaseModel
-
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
 
 
 # Pydantic 验证模型
@@ -58,10 +53,8 @@ class ItemUpdateRequest(BaseModel):
 
 # 定义插件路径
 PLUGIN_PATH = Path(__file__).parent.parent.parent
-DEFAULT_CONFIG_DIR = PLUGIN_PATH / "card_pool_configs"
 
 # 添加项目根目录到Python路径，以便导入db模块
-
 sys.path.insert(0, str(PLUGIN_PATH))
 
 # 导入数据库操作类
@@ -74,10 +67,9 @@ db = CommonDatabase()
 item_ops = ItemDBOperations(db)
 
 # 创建卡池配置管理器
-config_storage_path = Path(
-    os.path.join(os.path.dirname(__file__), "..", "..", "card_pool_configs")
-)
-cp_manager = CardPoolManager(config_storage_path)
+# 不传递参数，使用 CardPoolManager 内部定义的默认路径 (StarTools.get_data_dir)
+cp_manager = CardPoolManager()
+DEFAULT_CONFIG_DIR = cp_manager.config_dir
 
 app = Flask(__name__)
 CORS(app)  # 启用CORS支持

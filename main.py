@@ -65,16 +65,7 @@ class WutheringWavesGachaPlugin(Star):
 
         # 初始化抽卡
         self.gacha_mechanics = GachaMechanics(self.item_manager)
-        config_storage_path = self.config.get("config_storage_path")
-        
-        if config_storage_path:
-            config_storage_path = Path(config_storage_path)
-            if not config_storage_path.is_absolute():
-                config_storage_path = PLUGIN_PATH / config_storage_path
-        else:
-            config_storage_path = None
-            
-        self.cp_manager = CardPoolManager(config_storage_path)
+        self.cp_manager = CardPoolManager()
 
         # 其他设置
         self.save_rendered_results = self.config.get("save_rendered_results", False)
