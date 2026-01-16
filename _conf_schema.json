@@ -5,42 +5,29 @@
     "hint": "启用或禁用抽卡结果的图片渲染功能",
     "default": true
   },
-  "download_sources": {
-    "description": "下载源配置",
-    "type": "object",
-    "hint": "配置渲染时用到的资源下载源",
-    "items": {
-      "primary_sources_url": {
-        "description": "主要源URL",
-        "type": "string",
-        "hint": "主要资源下载源的URL地址",
-        "default": "https://raw.githubusercontent.com/TomyJan/WutheringWaves-UIResources/3.0/"
-      },
-      "mirror_sources_url": {
-        "description": "镜像源URL",
-        "type": "list",
-        "hint": "镜像资源下载源的URL地址，当主要源不可用时使用",
-        "default": ["https://gitee.com", "https://hub.fastgit.org", "https://ghproxy.com"]
-      }
-    }
+    "enable_history_recording": {
+    "description": "是否记录历史抽卡记录",
+    "type": "bool",
+    "hint": "是否保存用户的抽卡历史记录",
+    "default": true
+  },
+    "save_rendered_results": {
+    "description": "是否保存渲染结果",
+    "type": "bool",
+    "hint": "是否将渲染的抽卡结果图片保存到指定文件夹",
+    "default": false
+  },
+    "render_output_path": {
+    "description": "渲染结果保存路径",
+    "type": "string",
+    "hint": "抽卡结果图片的保存目录路径",
+    "default": "./rendered_results"
   },
   "config_storage_path": {
     "description": "卡池配置文件存储路径",
     "type": "string",
     "hint": "卡池配置文件的存储目录路径",
     "default": "./card_pool_configs"
-  },
-  "save_rendered_results": {
-    "description": "是否保存渲染结果",
-    "type": "bool",
-    "hint": "是否将渲染的抽卡结果图片保存到指定文件夹",
-    "default": false
-  },
-  "render_output_path": {
-    "description": "渲染结果保存路径",
-    "type": "string",
-    "hint": "抽卡结果图片的保存目录路径",
-    "default": "./rendered_results"
   },
   "cache_cleanup_interval": {
     "description": "资源缓存清理周期",
@@ -50,10 +37,16 @@
     "minimum": 1,
     "maximum": 720
   },
-  "enable_history_recording": {
-    "description": "是否记录历史抽卡记录",
+  "enable_proxy": {
+    "description": "是否开启网络代理",
     "type": "bool",
-    "hint": "是否保存用户的抽卡历史记录",
-    "default": true
+    "hint": "是否启用网络代理功能，开启后需配置有效的代理地址",
+    "default": false
+  },
+  "proxy_url": {
+    "description": "网络代理地址",
+    "type": "string",
+    "hint": "网络代理地址 (例如 http://127.0.0.1:7890), 如果省略协议头默认使用 http://",
+    "default": ""
   }
 }

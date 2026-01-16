@@ -3,11 +3,11 @@
 负责所有与数据库相关的操作，包括数据查询、插入、更新和删除
 只包含基本的、业务无关的数据库操作方法
 """
-import sqlite3
+
 import logging
-from pathlib import Path
+import sqlite3
 from contextlib import contextmanager
-from typing import List
+from pathlib import Path
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -16,13 +16,20 @@ logger = logging.getLogger(__name__)
 # 定义插件路径
 PLUGIN_PATH = Path(__file__).parent.parent.parent
 
+
 class CommonDatabase:
     """通用数据库操作类"""
 
-    def __init__(self, db_path: Path = PLUGIN_PATH.parent.parent / 'plugin_data' / 'astrbot_plugin_ww_gacha_sim' / 'ww_gacha_sim_data.db'):
+    def __init__(
+        self,
+        db_path: Path = PLUGIN_PATH.parent.parent
+        / "plugin_data"
+        / "astrbot_plugin_ww_gacha_sim"
+        / "ww_gacha_sim_data.db",
+    ):
         """
         初始化数据库连接
-        
+
         Args:
             db_path: 数据库文件路径
         """
@@ -44,8 +51,8 @@ class CommonDatabase:
         conn = None
         try:
             conn = sqlite3.connect(self.db_path)
-            conn.execute('PRAGMA foreign_keys = ON')  # 启用外键约束
-            conn.execute('PRAGMA journal_mode = WAL')  # 启用WAL模式，提高并发性能
+            conn.execute("PRAGMA foreign_keys = ON")  # 启用外键约束
+            conn.execute("PRAGMA journal_mode = WAL")  # 启用WAL模式，提高并发性能
             yield conn
         except sqlite3.Error as e:
             logger.error(f"数据库连接错误: {e}")
@@ -57,14 +64,14 @@ class CommonDatabase:
                 conn.close()
 
     # 通用数据库操作方法
-    def execute_query(self, query: str, params: tuple = ()) -> List[sqlite3.Row]:
+    def execute_query(self, query: str, params: tuple = ()) -> list[sqlite3.Row]:
         """
         执行查询操作
-        
+
         Args:
             query: SQL查询语句
             params: 查询参数
-            
+
         Returns:
             查询结果列表
         """
@@ -81,11 +88,11 @@ class CommonDatabase:
     def execute_query_single(self, query: str, params: tuple = ()) -> sqlite3.Row:
         """
         执行查询操作，返回单个结果
-        
+
         Args:
             query: SQL查询语句
             params: 查询参数
-            
+
         Returns:
             查询结果，如果没有结果返回None
         """
@@ -95,11 +102,11 @@ class CommonDatabase:
     def execute_update(self, query: str, params: tuple = ()) -> int:
         """
         执行更新操作（INSERT, UPDATE, DELETE）
-        
+
         Args:
             query: SQL更新语句
             params: 更新参数
-            
+
         Returns:
             影响的行数
         """
@@ -108,20 +115,22 @@ class CommonDatabase:
                 cursor = conn.cursor()
                 cursor.execute(query, params)
                 conn.commit()
-                logger.debug(f"更新执行成功，影响行数: {cursor.rowcount}, SQL: {query}, Params: {params}")
+                logger.debug(
+                    f"更新执行成功，影响行数: {cursor.rowcount}, SQL: {query}, Params: {params}"
+                )
                 return cursor.rowcount
         except sqlite3.Error as e:
             logger.error(f"更新执行错误: {e}, SQL: {query}, Params: {params}")
             raise
 
-    def execute_many(self, query: str, params_list: List[tuple]) -> int:
+    def execute_many(self, query: str, params_list: list[tuple]) -> int:
         """
         执行批量操作
-        
+
         Args:
             query: SQL语句
             params_list: 参数列表
-            
+
         Returns:
             影响的行数
         """
@@ -139,7 +148,7 @@ class CommonDatabase:
     def execute_script(self, script: str) -> None:
         """
         执行SQL脚本
-        
+
         Args:
             script: SQL脚本内容
         """

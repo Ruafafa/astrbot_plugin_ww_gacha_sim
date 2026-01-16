@@ -1,0 +1,26 @@
+# Ignore everything by default
+*
+
+# Whitelist directories (allow git to traverse them)
+!card_pool_configs/
+!src/
+!.github/
+
+# Whitelist files in root
+!_conf_schema.json
+!.gitignore
+!logo.png
+!main.py
+!metadata.yaml
+!README.md
+!requirements.txt
+
+# Whitelist contents of directories
+!card_pool_configs/**
+!src/**
+!.github/**
+
+# Blacklist specific unwanted paths
+src/web/dev/
+**/__pycache__/
+*.pyc
