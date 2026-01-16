@@ -80,11 +80,11 @@ git clone https://github.com/Ruafafa/astrbot_plugin_ww_gacha_sim.git ./data/plug
 
 在插件根目录(AstrBot\data\plugins\astrbot_plugin_ww_gacha_sim)下执行以下命令启动WEBUI
 ```bash
-python -m src.web.sever 
+python -m src.web.server 
 ```
 WEBUI默认端口为`5000`，首次启动插件时会自动打开浏览器访问`http://localhost:5000`，如遇到端口冲突可以在启动时指定不同端口，例如：
 ```bash
-python -m src.web.sever --port 8000
+python -m src.web.server --port 8000
 ```
 
 ### 卡池配置界面
