@@ -51,21 +51,27 @@ git clone https://github.com/Ruafafa/astrbot_plugin_ww_gacha_sim.git ./data/plug
 ### 指令演示
 
 `/卡池`
+
 ![alt text](.github/image/cp.png)
 
 `/唤取 <卡池ID/名称>`
+
 ![alt text](.github/image/gache_set.png)
 
 `/单抽`
+
 ![alt text](.github/image/single.png)
 
 `/十抽`
+
 ![alt text](.github/image/ten.png)
 
 `/抽卡记录 <卡池ID/名称>`
+
 ![alt text](.github/image/history.png)
 
 `/卡池详细 <卡池ID/名称>`
+
 ![alt text](.github/image/cp_detail.png)
 
 ## 卡池配置
@@ -74,11 +80,11 @@ git clone https://github.com/Ruafafa/astrbot_plugin_ww_gacha_sim.git ./data/plug
 
 在插件根目录(AstrBot\data\plugins\astrbot_plugin_ww_gacha_sim)下执行以下命令启动WEBUI
 ```bash
-python -m src.web.sever 
+python -m src.web.server 
 ```
 WEBUI默认端口为`5000`，首次启动插件时会自动打开浏览器访问`http://localhost:5000`，如遇到端口冲突可以在启动时指定不同端口，例如：
 ```bash
-python -m src.web.sever --port 8000
+python -m src.web.server --port 8000
 ```
 
 ### 卡池配置界面
@@ -86,7 +92,7 @@ WEBUI的卡池配置页默认展示 default 配置组下的所有卡池配置，
 你可以在该界面增添、删除、启用、禁用不同的卡池配置，也可以直接编辑JSON文件来修改卡池配置（不建议这样操作）。
 卡池配置文件默认位于 `card_pool_configs/` 目录下，支持JSON格式
 ![alt text](.github/image/webui.png)
-> ![NOTICE]
+> [!NOTE]
 > 虽然WEBUI中只展示了选中配置组下的卡池配置，但这不意味者其他的配置组下的卡池配置不会被用户的`/卡池`指令展示，**只有通过启用、禁用卡池配置，才会在`/卡池`指令中选择展示。**
 > 同时，**卡池的状态只会在插件加载时生效**，如果在插件运行过程中修改了卡池的状态（比如启用状态或者概率参数），必须重载插件后才可应用最新状态。
 
@@ -108,13 +114,13 @@ WEBUI的卡池配置页默认展示 default 配置组下的所有卡池配置，
 - `portrait URL（立绘URL）`：物品的渲染时所用立绘的URL
 
 
-> ![NOTICE]
+> [!NOTE]
 > 物品的 `external_id` 必须是唯一的，不能与其他物品重复。
 
 需要注意的是，各个配置组下的物品列表是相互隔离的，即一个配置组下的物品不会影响到其他配置组下的物品。
 在首次使用或创建配置组时，如果该配置组中没有物品，插件会自动从 `default.csv` 导入默认物品数据。
 
-> ![WARNING]
+> [!WARNING]
 > 由于默认的default.csv文件中没有提供立绘的本地路径，在开启了渲染功能后，物品的立绘将从URL中获取。而默认提供的URL是从 GITHUB 上的仓库 `TomyJan/WutheringWaves-UIResources` 中获取的，国内**建议开启系统代理**，否则可能会因为网络问题导致加载失败。 
 > 如果无法开启系统代理，也可以手动下载物品立绘并指定本地路径。并直接修改物品的立绘URL为本地路径。
 > 你也可以通过一些加速服务如 [gh-proxy.com](https://gh-proxy.com/)，在`.csv`文件中替换原有的URL为加速后的URL，通过WEBUI提供的导入csv功能一键导入。
