@@ -78,7 +78,7 @@ git clone https://github.com/Ruafafa/astrbot_plugin_ww_gacha_sim.git ./data/plug
 
 ### WEBUI启动
 
-在插件根目录(AstrBot\data\plugins\astrbot_plugin_ww_gacha_sim)下执行以下命令启动WEBUI
+Astrbot运行过程中，在插件根目录(AstrBot\data\plugins\astrbot_plugin_ww_gacha_sim)下执行以下命令启动WEBUI
 ```bash
 python -m src.web.server 
 ```
@@ -86,6 +86,8 @@ WEBUI默认端口为`5000`，首次启动插件时会自动打开浏览器访问
 ```bash
 python -m src.web.server --port 8000
 ```
+> [!WARNING]
+> 注意！卡池的状态只会在插件加载时生效，更改卡池配置文件后请重载插件以确保配置生效！！！
 
 ### 卡池配置界面
 WEBUI的卡池配置页默认展示 default 配置组下的所有卡池配置，你可以通过左上角的选择配置组来切换不同的配置组，如果你想添加新的配置组，只需要在新建的卡池配置中指定新的配置组名称即可自动创建配置组。
