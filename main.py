@@ -113,105 +113,6 @@ class WutheringWavesGachaPlugin(Star):
         except Exception as e:
             logger.error(f"保存抽卡结果图片失败: {e}")
 
-    async def _get_target_config(self, event: AstrMessageEvent, pool_identifier: str = ""):
-        """
-        根据用户输入和默认设置获取目标卡池配置
-        """
-        sender_id = str(event.get_sender_id())
-        config_ids = self.cp_manager.get_config_ids()
-
-        if not config_ids:
-            yield event.plain_result(
-                "当前没有可用的卡池配置，请先创建卡池配置文件。"
-            )
-            return None
-
-        # 如果未指定卡池标识符，则从KV存储中获取用户的默认卡池设置（存储的是 cp_id）
-        if pool_identifier == "":
-            saved_cp_id = await self.get_kv_data(
-                f"user_default_pool_{sender_id}", default=None
-            )
-
-            # 检查保存的 cp_id 是否仍然存在于当前的 config_ids 中
-            if saved_cp_id and saved_cp_id in config_ids:
-                pool_identifier = saved_cp_id
-            else:
-                # cp_id 不存在或用户未设置，使用第一个可用的卡池
-                pool_identifier = config_ids[0]
-
-                # 如果保存的 cp_id 不存在，清理无效数据
-                if saved_cp_id and saved_cp_id not in config_ids:
-                    await self.delete_kv_data(f"user_default_pool_{sender_id}")
-                    logger.info(
-                        f"用户 {sender_id} 的默认卡池 {saved_cp_id} 不存在，已清理"
-                    )
-
-        # 使用 CardPoolManager 的查找方法
-        target_config = self.cp_manager.find_config_by_identifier(pool_identifier)
-
-        if target_config is None:
-            pool_list = "找不到指定的卡池。可用的卡池有：\n"
-            for i, cp_id in enumerate(config_ids, 1):
-                try:
-                    config = self.cp_manager.get_config_by_cp_id(cp_id)
-                    # 检查配置是否启用
-                    if config.enable:
-                        pool_list += f"{i}. {config.name} - ID: {config.cp_id}\n"
-                except Exception as e:
-                    logger.warning(f"获取卡池 {cp_id} 详情失败: {e}")
-                    pool_list += f"{i}. {cp_id} (获取详情失败)\n"
-
-            yield event.plain_result(pool_list)
-            return None
-
-        # 检查配置是否启用
-        if not target_config.enable:
-            yield event.plain_result(
-                f"卡池「{target_config.name}」已被禁用，无法进行抽卡。"
-            )
-            return None
-
-        return target_config
-
-    @filter.command("单抽", alias={"单次抽卡", "抽卡", "单次唤取"})
-    async def single_pull(self, event: AstrMessageEvent, pool_identifier: str = ""):
-        """
-        单次抽卡命令，默认使用用户设置的默认卡池
-
-        参数:
-            event: 消息事件对象
-            pool_identifier: 卡池标识符（可选），可以是 cp_id、配置文件路径或卡池名称，如果不提供则使用默认卡池
-        """
-        try:
-            sender_id = str(event.get_sender_id())
-            
-            # 使用辅助方法获取目标配置
-            target_config_gen = self._get_target_config(event, pool_identifier)
-            
-            # _get_target_config 是一个异步生成器 (因为可能 yield 消息)
-            # 我们需要迭代它来获取结果或发送消息
-            target_config = None
-            async for result in target_config_gen:
-                if isinstance(result, CardPoolConfig): # 假设我们修改 _get_target_config 返回配置而不是 yield
-                   # 实际上 _get_target_config 当前是 yield 消息的生成器，如果 yield 了消息，说明有错误或提示
-                   # 如果没有 yield 消息，我们需要一种方式返回配置
-                   pass
-                else:
-                    # 这是一个 AstrBot 消息组件
-                    yield result
-                    return # 只要有消息 yield 出来，说明流程中断（找不到卡池等）
-            
-            # 由于 _get_target_config 的设计比较复杂（既要 yield 消息又要返回结果），
-            # 这里的重构稍微调整一下：让 _get_target_config 只负责查找逻辑，
-            # 如果找不到返回 None，消息发送逻辑保留在外面或者通过异常/状态码返回。
-            # 但为了复用代码，我们可以让 _get_target_config 在出错时 yield 消息并返回 None
-            # 但 Python 生成器不能既 yield 又 return 值给调用者（虽然 Python 3.3+ 支持 return，但必须 catch StopIteration）
-            
-            # 重新思考：我们重写 _get_target_config 逻辑
-            pass
-        except Exception:
-            pass
-
     # 重新实现 _get_target_config 为普通异步方法，返回 (config, message_yield)
     async def _resolve_pool_config(self, event: AstrMessageEvent, pool_identifier: str):
         sender_id = str(event.get_sender_id())
@@ -697,7 +598,9 @@ class WutheringWavesGachaPlugin(Star):
                     enriched_history.append(record_copy)
 
                 # 渲染图片
-                rendered_image = self.renderer.render_history(
+                import asyncio
+                rendered_image = await asyncio.to_thread(
+                    self.renderer.render_history,
                     enriched_history,
                     page,
                     total_pages,
@@ -799,7 +702,8 @@ class WutheringWavesGachaPlugin(Star):
                 return
 
             # 渲染详情图
-            image = self.renderer.render_pool_detail(target_config)
+            import asyncio
+            image = await asyncio.to_thread(self.renderer.render_pool_detail, target_config)
             
             # 发送图片
             import io

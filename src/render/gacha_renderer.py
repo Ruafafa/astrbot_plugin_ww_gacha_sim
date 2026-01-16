@@ -285,7 +285,7 @@ class GachaRenderer:
 
         # --- 图层 2: 背景层 (Background) ---
         bg_sprite_name = f"bg_star_{rarity}.png"
-        bg_img = self.ui_resource_manager._extract_sprite_from_atlas(
+        bg_img = self.ui_resource_manager.get_sprite_from_atlas(
             bg_sprite_name, remove_transparent_border=False
         )
         if bg_img:
@@ -346,7 +346,7 @@ class GachaRenderer:
 
         # --- 图层 4: 信息展示层 (Info/Show Layer) ---
         show_sprite_name = f"show_star_{rarity}.png"
-        show_img = self.ui_resource_manager._extract_sprite_from_atlas(
+        show_img = self.ui_resource_manager.get_sprite_from_atlas(
             show_sprite_name, remove_transparent_border=False
         )  # 不再移除透明边界以保持一致的定位基准
         if show_img:

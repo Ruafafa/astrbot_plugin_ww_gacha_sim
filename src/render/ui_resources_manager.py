@@ -56,7 +56,7 @@ class UIResourceManager:
         # 确保目录存在
         self.resource_dir.mkdir(exist_ok=True)
 
-    def _extract_sprite_from_atlas(
+    def get_sprite_from_atlas(
         self, sprite_name: str, remove_transparent_border: bool = False
     ) -> Image.Image | None:
         """从精灵表中提取指定精灵，确保保留完整的透明通道信息"""
@@ -191,7 +191,7 @@ class UIResourceManager:
         """根据品质获取背景路径"""
         # 从精灵表中提取背景精灵
         sprite_name = f"bg_star_{quality}.png"
-        sprite_img = self._extract_sprite_from_atlas(
+        sprite_img = self.get_sprite_from_atlas(
             sprite_name, remove_transparent_border=True
         )
 
@@ -222,7 +222,7 @@ class UIResourceManager:
     def get_halftone_pattern(self) -> Image.Image | None:
         """获取半调图案"""
         sprite_name = "bandiao.png"
-        sprite_img = self._extract_sprite_from_atlas(
+        sprite_img = self.get_sprite_from_atlas(
             sprite_name, remove_transparent_border=False
         )
         if sprite_img:
