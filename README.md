@@ -59,6 +59,7 @@ git clone https://github.com/Ruafafa/astrbot_plugin_ww_gacha_sim.git ./data/plug
 ![alt text](.github/image/gache_set.png)
 
 `/单抽`
+
 ![alt text](.github/image/single.png)
 
 `/十抽`
