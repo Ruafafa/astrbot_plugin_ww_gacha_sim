@@ -27,9 +27,10 @@ git clone https://github.com/Ruafafa/astrbot_plugin_ww_gacha_sim.git ./data/plug
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | `enable_rendering` | bool | `true` | 是否开启渲染功能，启用或禁用抽卡结果的图片渲染 |
-| `save_rendered_results` | bool | `false` | 是否将渲染的抽卡结果图片保存到指定文件夹 |
+| `enable_webui` | bool | `true` | 是否在插件加载时自动启动 WebUI 管理界面 |
+| `webui_port` | int | `5000` | WebUI 的运行端口号，范围 1024-65535 |
+| `save_rendered_results` | bool | `false` | 是否将渲染的抽卡结果图片保存到 data 目录下 |
 | `config_storage_path` | string | `./card_pool_configs` | 卡池配置文件的存储目录路径 |
-| `render_output_path` | string | `./rendered_results` | 抽卡结果图片的保存目录路径 |
 | `cache_cleanup_interval` | int | `24` | 资源缓存自动清理的时间间隔（单位：小时），范围1-720 |
 | `enable_history_recording` | bool | `true` | 是否保存用户的抽卡历史记录 |
 | `proxy_url` | string | `""` | 网络代理地址|
@@ -78,14 +79,29 @@ git clone https://github.com/Ruafafa/astrbot_plugin_ww_gacha_sim.git ./data/plug
 
 ### WEBUI启动
 
-Astrbot运行过程中，在插件根目录(AstrBot\data\plugins\astrbot_plugin_ww_gacha_sim)下执行以下命令启动WEBUI
+#### 自动启动
+
+插件加载时将根据配置项自动启动 WebUI。在 AstrBot 仪表板中设置以下配置：
+
+- `enable_webui`（默认 `true`）：插件加载时自动在后台启动 WebUI
+- `webui_port`（默认 `5000`）：指定 WebUI 的运行端口
+
+启动后访问 `http://localhost:5000` 即可打开管理界面。
+
+#### 手动启动
+
+如需手动启动 WebUI，在插件根目录下执行以下命令：
+
 ```bash
 python -m src.web.server 
 ```
-WEBUI默认端口为`5000`，首次启动插件时会自动打开浏览器访问`http://localhost:5000`，如遇到端口冲突可以在启动时指定不同端口，例如：
+
+默认端口为 `5000`，如遇到端口冲突可以指定不同端口：
+
 ```bash
 python -m src.web.server --port 8000
 ```
+
 > [!WARNING]
 > 注意！卡池的状态只会在插件加载时生效，更改卡池配置文件后请重载插件以确保配置生效！！！
 

@@ -18,9 +18,6 @@ from .src.render.proxy_config import ProxyConfig
 from .src.render.resource_loader import ResourceLoader
 from .src.render.ui_resources_manager import UIResourceManager
 
-PLUGIN_PATH = Path(__file__).parent
-
-
 class WutheringWavesGachaPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         """
@@ -66,50 +63,39 @@ class WutheringWavesGachaPlugin(Star):
         self.gacha_mechanics = GachaMechanics(self.item_manager)
         self.cp_manager = CardPoolManager()
 
-        # 其他设置
+        # 是否保存渲染结果到本地
         self.save_rendered_results = self.config.get("save_rendered_results", False)
-        self.render_output_path = self.config.get("render_output_path")
 
-        # 初始化插件所需的各种组件
-        # 例如：数据库连接、配置管理器等
+        # WebUI 自动启动
+        if self.config.get("enable_webui", False):
+            webui_port = self.config.get("webui_port", 5000)
+            try:
+                import asyncio
+                import threading
+                from .src.web.server import run as run_webui
+
+                threading.Thread(
+                    target=run_webui,
+                    kwargs={"host": "0.0.0.0", "port": webui_port, "debug": False},
+                    daemon=True,
+                ).start()
+                logger.info(f"WebUI 已自动启动于 http://0.0.0.0:{webui_port}")
+            except Exception as e:
+                logger.error(f"启动 WebUI 失败: {e}")
+
         logger.info("鸣潮模拟抽卡插件已初始化")
 
     def _save_rendered_image(self, image, user_id: str):
-        """
-        保存渲染结果图片
-        
-        Args:
-            image: PIL Image 对象
-            user_id: 用户ID
-        """
         if not self.save_rendered_results:
             return
-
         try:
-            # 获取输出路径配置
-            output_path_str = self.render_output_path
-            
-            if output_path_str:
-                output_path = Path(output_path_str)
-                # 处理相对路径
-                if not output_path.is_absolute():
-                    # 相对于插件目录
-                    output_path = PLUGIN_PATH / output_path
-            else:
-                output_path = Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim")) / "rendered_results"
-            
-            # 确保目录存在
+            output_path = Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim")) / "rendered_results"
             output_path.mkdir(parents=True, exist_ok=True)
-            
-            # 生成文件名
             timestamp = int(time.time())
             filename = f"gacha_result_{user_id}_{timestamp}.png"
             file_path = output_path / filename
-            
-            # 保存图片
             image.save(file_path, format="PNG")
             logger.info(f"已保存抽卡结果图片: {file_path}")
-            
         except Exception as e:
             logger.error(f"保存抽卡结果图片失败: {e}")
 
@@ -194,12 +180,11 @@ class WutheringWavesGachaPlugin(Star):
                     user_id=sender_id
                 )
 
-                # 保存渲染结果
-                self._save_rendered_image(rendered_image, sender_id)
-
                 # 将图片转换为字节数据并发送
                 import io
                 from astrbot.core.message.components import Image
+
+                self._save_rendered_image(rendered_image, sender_id)
 
                 img_byte_arr = io.BytesIO()
                 rendered_image.save(img_byte_arr, format="PNG")
@@ -271,13 +256,12 @@ class WutheringWavesGachaPlugin(Star):
                     user_id=sender_id
                 )
 
-                # 保存渲染结果
-                self._save_rendered_image(rendered_image, sender_id)
-
                 # 将图片转换为字节数据并发送
                 import io
 
                 from astrbot.core.message.components import Image
+
+                self._save_rendered_image(rendered_image, sender_id)
 
                 img_byte_arr = io.BytesIO()
                 rendered_image.save(img_byte_arr, format="PNG")

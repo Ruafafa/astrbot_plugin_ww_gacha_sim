@@ -11,17 +11,25 @@
     "hint": "是否保存用户的抽卡历史记录",
     "default": true
   },
-    "save_rendered_results": {
+  "enable_webui": {
+    "description": "启动时自动打开WebUI",
+    "type": "bool",
+    "hint": "启用后，插件加载时将自动在后台启动Web管理界面",
+    "default": true
+  },
+  "save_rendered_results": {
     "description": "是否保存渲染结果",
     "type": "bool",
-    "hint": "是否将渲染的抽卡结果图片保存到指定文件夹",
+    "hint": "是否将渲染的抽卡结果图片保存到 data 目录下",
     "default": false
   },
-    "render_output_path": {
-    "description": "渲染结果保存路径",
-    "type": "string",
-    "hint": "抽卡结果图片的保存目录路径",
-    "default": "./rendered_results"
+  "webui_port": {
+    "description": "WebUI端口",
+    "type": "int",
+    "hint": "Web管理界面的运行端口号",
+    "default": 5000,
+    "minimum": 1024,
+    "maximum": 65535
   },
   "cache_cleanup_interval": {
     "description": "资源缓存清理周期",

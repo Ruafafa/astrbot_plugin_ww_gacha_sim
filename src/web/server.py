@@ -1,18 +1,19 @@
 import argparse
+import asyncio
 import json
 import os
+import signal
 import sys
 import webbrowser
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Timer
 from typing import Any
-from wsgiref.simple_server import make_server
 
 from astrbot.api import logger
 from astrbot.api.star import StarTools
-from flask import Flask, Response, jsonify, make_response, request, send_from_directory
-from flask_cors import CORS
 from pydantic import BaseModel
+from quart import Quart, Response, jsonify, make_response, request, send_from_directory
 
 
 # Pydantic 验证模型
@@ -71,16 +72,24 @@ item_ops = ItemDBOperations(db)
 cp_manager = CardPoolManager()
 DEFAULT_CONFIG_DIR = cp_manager.config_dir
 
-app = Flask(__name__)
-CORS(app)  # 启用CORS支持
+app = Quart(__name__)
 
-# 配置 Flask
+# 配置
 app.config["DEBUG"] = False  # 默认关闭调试模式，使用 --debug 参数启用
+
+
+# 处理 CORS（前端与后端同源时不需要，但为开发环境保留）
+@app.after_request
+async def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    return response
 
 
 # 配置文件管理
 @app.route("/api/configs/directory", methods=["GET", "POST"])
-def config_directory() -> Response:
+async def config_directory() -> Response:
     """
     配置目录管理接口
     GET: 获取当前默认配置目录
@@ -94,7 +103,7 @@ def config_directory() -> Response:
     """
     if request.method == "POST":
         try:
-            data = DirectoryRequest(**request.get_json())
+            data = DirectoryRequest(**await request.get_json())
             config_dir = data.directory
 
             if config_dir and os.path.exists(config_dir):
@@ -109,7 +118,7 @@ def config_directory() -> Response:
 
 
 @app.route("/api/configs/list", methods=["GET"])
-def config_list() -> Response:
+async def config_list() -> Response:
     # 获取配置文件列表
     config_dir = request.args.get("directory", str(DEFAULT_CONFIG_DIR))
 
@@ -144,7 +153,7 @@ def config_list() -> Response:
 
 
 @app.route("/api/configs/<path:filename>", methods=["GET", "POST", "DELETE", "PUT"])
-def config_file(filename: str) -> Response:
+async def config_file(filename: str) -> Response:
     config_dir = request.args.get("directory", str(DEFAULT_CONFIG_DIR))
 
     # 根据请求方法处理不同的逻辑
@@ -185,7 +194,7 @@ def config_file(filename: str) -> Response:
 
     elif request.method == "POST":
         # 创建或更新配置文件
-        data = request.get_json()
+        data = await request.get_json()
         content = data.get("content")
 
         # 获取 config_group，默认为 'default'
@@ -219,7 +228,7 @@ def config_file(filename: str) -> Response:
 
     elif request.method == "PUT":
         # 启用或禁用配置
-        data = request.get_json()
+        data = await request.get_json()
         enable = data.get("enable", True)
 
         try:
@@ -294,9 +303,9 @@ def config_file(filename: str) -> Response:
 
 # 数据库与物品管理
 @app.route("/api/db/items", methods=["GET", "POST", "PUT", "DELETE"])
-def items() -> Response:
+async def items() -> Response:
     # 获取请求数据
-    data = request.get_json() if request.method in ["POST", "PUT"] else None
+    data = await request.get_json() if request.method in ["POST", "PUT"] else None
 
     # 确定config_group：优先使用请求体中的config_group，其次使用URL参数，默认使用default
     if request.method == "GET":
@@ -573,22 +582,52 @@ def items() -> Response:
 
 # 静态资源服务
 @app.route("/")
-def index() -> Response:
+async def index() -> Response:
     # 指向 static 目录
     static_dir = os.path.join(os.path.dirname(__file__), "static")
-    return send_from_directory(static_dir, "index.html")
+    return await send_from_directory(static_dir, "index.html")
 
 
 @app.route("/<path:filename>")
-def static_files(filename: str) -> Response:
+async def static_files(filename: str) -> Response:
     # 指向 static 目录
     static_dir = os.path.join(os.path.dirname(__file__), "static")
     try:
-        return send_from_directory(static_dir, filename)
+        return await send_from_directory(static_dir, filename)
     except FileNotFoundError:
-        response = make_response(jsonify({"success": False, "message": "文件不存在"}))
+        response = await make_response(
+            jsonify({"success": False, "message": "文件不存在"})
+        )
         response.status_code = 404
         return response
+
+
+@contextmanager
+def _patch_signal_for_thread():
+    """
+    非主线程中 Hypercorn 注册信号处理器会失败。
+    将 signal.signal 包装为静默降级，避免 ValueError。
+    """
+    original_signal = signal.signal
+
+    def _patched_signal(signalnum, handler, /):
+        try:
+            return original_signal(signalnum, handler)
+        except ValueError:
+            return None
+
+    signal.signal = _patched_signal
+    try:
+        yield
+    finally:
+        signal.signal = original_signal
+
+
+def run(host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
+    """运行 Quart Web 服务器（同步入口，用于在线程中启动）。"""
+    app.config["DEBUG"] = debug
+    with _patch_signal_for_thread():
+        asyncio.run(app.run_task(host=host, port=port, debug=debug))
 
 
 def parse_arguments():
@@ -638,32 +677,6 @@ def open_browser(port: int):
     webbrowser.open(url)
 
 
-def run_production_server(host: str, port: int):
-    """
-    使用标准库 wsgiref 运行服务器，消除警告
-
-    Args:
-        host: 监听地址
-        port: 监听端口
-    """
-    print("[*] 鸣潮模拟抽卡插件 Web 服务器启动中...")
-    print(f"[*] 运行环境: {sys.platform}")
-    print(f"[*] 监听地址: http://{host}:{port}")
-
-    # 创建服务器实例，使用 Flask 的 WSGI 应用
-    server = make_server(host, port, app.wsgi_app)
-
-    # 启动成功后，延迟1秒打开浏览器（确保服务器已在监听）
-    Timer(1.0, open_browser, args=[port]).start()
-
-    # 开始阻塞运行
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n[*] 服务器已停止")
-        sys.exit(0)
-
-
 if __name__ == "__main__":
     # 解析命令行参数
     args = parse_arguments()
@@ -675,16 +688,17 @@ if __name__ == "__main__":
         # 根据参数设置调试模式
         app.config["DEBUG"] = args.debug
 
-        # 运行模式选择
-        if args.debug:
-            # 调试模式：依然使用 Flask 自带服务器（支持热重载，有红色警告）
-            # 同样需要先启动浏览器定时器
-            Timer(1.5, open_browser, args=[args.port]).start()
-            app.run(host="0.0.0.0", port=args.port, debug=True)
-        else:
-            # 生产模式：使用 wsgiref（无红色警告，跨平台，标准库）
-            run_production_server("0.0.0.0", args.port)
+        print("[*] 鸣潮模拟抽卡插件 Web 服务器启动中...")
+        print(f"[*] 运行环境: {sys.platform}")
+        print(f"[*] 监听地址: http://0.0.0.0:{args.port}")
 
+        # 启动成功后在异步事件循环开启后打开浏览器
+        Timer(1.5, open_browser, args=[args.port]).start()
+
+        # 使用 Quart 的异步运行
+        asyncio.run(
+            app.run_task(host="0.0.0.0", port=args.port, debug=args.debug)
+        )
     except Exception as e:
         print(f"启动服务器失败: {e}", file=sys.stderr)
         sys.exit(1)
