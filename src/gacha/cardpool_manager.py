@@ -128,7 +128,10 @@ class CardPoolManager:
         """
         if config_dir_path is None:
             # 使用 StarTools 获取标准数据目录
-            self.config_dir = Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim")) / "card_pool_configs"
+            self.config_dir = (
+                Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim"))
+                / "card_pool_configs"
+            )
         else:
             self.config_dir = config_dir_path
         self._configs: dict[str, CardPoolConfig] = {}  # 内存中的配置数据，键为 cp_id
@@ -182,10 +185,16 @@ class CardPoolManager:
             return 0
 
         added = 0
-        existing_names = {p.name for p in self.config_dir.iterdir() if p.suffix == ".json"}
+        existing_names = {
+            p.name for p in self.config_dir.iterdir() if p.suffix == ".json"
+        }
 
         for item in presets_dir.iterdir():
-            if item.is_file() and item.suffix == ".json" and item.name not in existing_names:
+            if (
+                item.is_file()
+                and item.suffix == ".json"
+                and item.name not in existing_names
+            ):
                 shutil.copy2(item, self.config_dir / item.name)
                 logger.info(f"已同步新预置配置: {item.name}")
                 added += 1
@@ -199,32 +208,32 @@ class CardPoolManager:
     def find_config_by_identifier(self, identifier: str) -> CardPoolConfig | None:
         """
         根据标识符查找卡池配置
-        
+
         参数:
             identifier: 卡池标识符（cp_id、配置文件路径或卡池名称）
-            
+
         返回:
             匹配的卡池配置，如果没有找到则返回 None
         """
         if not identifier:
             return None
-            
+
         # 1. 尝试直接通过 cp_id 匹配
         if identifier in self._configs:
             return self._configs[identifier]
-            
+
         # 2. 尝试通过文件路径匹配
         # 标准化路径分隔符，移除 .json 后缀
         normalized_path = identifier.replace("\\", "/").replace(".json", "")
         if normalized_path in self._file_path_to_cp_id:
             cp_id = self._file_path_to_cp_id[normalized_path]
             return self._configs[cp_id]
-            
+
         # 3. 尝试通过名称模糊匹配
         for config in self._configs.values():
             if config.name == identifier:
                 return config
-                
+
         return None
 
     def _ensure_dir_exists(self):
@@ -300,8 +309,12 @@ class CardPoolManager:
                                             file_path, config_data["name"]
                                         )
                                     # 转换为数据类实例
-                                    config_instance = CardPoolConfig.from_dict(config_data)
-                                    self._configs[config_instance.cp_id] = config_instance
+                                    config_instance = CardPoolConfig.from_dict(
+                                        config_data
+                                    )
+                                    self._configs[config_instance.cp_id] = (
+                                        config_instance
+                                    )
                                     self._file_path_to_cp_id[file_path] = (
                                         config_instance.cp_id
                                     )
@@ -316,7 +329,9 @@ class CardPoolManager:
                                 raise OSError(f"读取配置文件 {file_path} 失败: {e}")
                             except Exception as e:
                                 logger.error(f"处理配置文件 {file_path} 失败: {e}")
-                                raise RuntimeError(f"处理配置文件 {file_path} 失败: {e}")
+                                raise RuntimeError(
+                                    f"处理配置文件 {file_path} 失败: {e}"
+                                )
 
             logger.info(f"共加载 {len(self._configs)} 个配置文件")
             return self._configs.copy()
@@ -749,7 +764,7 @@ class CardPoolManager:
             logger.error(f"配置文件不存在: {file_path}")
             raise KeyError(f"配置文件 {file_path} 不存在")
 
-        cp_id = self._file_path_to_cp_id[file_path]
+        self._file_path_to_cp_id[file_path]
         full_path = os.path.join(self.config_dir, f"{file_path}.json")
 
         try:

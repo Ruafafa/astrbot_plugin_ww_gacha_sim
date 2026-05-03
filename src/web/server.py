@@ -8,16 +8,13 @@ import threading
 import uuid
 import webbrowser
 from contextlib import contextmanager
-from pathlib import Path
 from threading import Timer
 from typing import Any
 
 import httpx
-
-from astrbot.api import logger
-from astrbot.api.star import StarTools
 from quart import Quart, Response, jsonify, make_response, request, send_from_directory
 
+from astrbot.api import logger
 
 # 导入数据库操作类
 from ..db.database import CommonDatabase
@@ -47,8 +44,7 @@ async def add_cors_headers(response):
         # 调试模式允许所有来源
         response.headers["Access-Control-Allow-Origin"] = "*"
     elif origin and (
-        origin.startswith("http://localhost")
-        or origin.startswith("http://127.0.0.1")
+        origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1")
     ):
         response.headers["Access-Control-Allow-Origin"] = origin
     else:
@@ -328,7 +324,7 @@ async def items() -> Response:
                         )
                         if found:
                             config_group = temp_config_group
-                except:
+                except Exception:
                     pass
 
             # 如果没找到，尝试从请求体中获取config_group
@@ -346,7 +342,7 @@ async def items() -> Response:
                             )
                             if found:
                                 config_group = temp_config_group
-                    except:
+                    except Exception:
                         pass
         else:
             # 清空表操作时，使用URL参数中的config_group
@@ -558,11 +554,18 @@ WIKI_CATALOGUES = {"1105": "character", "1106": "weapon"}
 # 中文字段名 → 英文类型标识（供前端及CSV使用）
 _ZH_TO_EN = {
     # 元素属性
-    "气动": "aero", "导电": "electro", "冷凝": "glacio",
-    "热熔": "fusion", "衍射": "spectro", "湮灭": "havoc",
+    "气动": "aero",
+    "导电": "electro",
+    "冷凝": "glacio",
+    "热熔": "fusion",
+    "衍射": "spectro",
+    "湮灭": "havoc",
     # 武器类型
-    "长刃": "broadblade", "臂铠": "gauntlets", "迅刀": "sword",
-    "佩枪": "pistols", "音感仪": "rectifier",
+    "长刃": "broadblade",
+    "臂铠": "gauntlets",
+    "迅刀": "sword",
+    "佩枪": "pistols",
+    "音感仪": "rectifier",
 }
 
 
@@ -571,9 +574,9 @@ def _generate_devcode() -> str:
     return uuid.uuid4().hex[:32]
 
 
-def _parse_detail_item(data: dict, catalogue_id: str,
-                        portrait_fallback: str = "",
-                        star_fallback: str = "4") -> dict | None:
+def _parse_detail_item(
+    data: dict, catalogue_id: str, portrait_fallback: str = "", star_fallback: str = "4"
+) -> dict | None:
     """
     解析 getEntryDetail 返回的 data，提取物品信息。
 
@@ -617,7 +620,7 @@ def _parse_detail_item(data: dict, catalogue_id: str,
                 for info_item in role.get("info", []):
                     text = info_item.get("text", "")
                     if text.startswith("属性："):
-                        cn = text[len("属性："):]
+                        cn = text[len("属性：") :]
                         affiliated_type = _ZH_TO_EN.get(cn, cn)
 
             # 武器：从 modules[0] → components[0] (tabs-component) 的 HTML 中解析
@@ -635,13 +638,12 @@ def _parse_detail_item(data: dict, catalogue_id: str,
                                 portrait_url = m.group(1)
                         # 提取"武器类型"行的值（标签可能被 <strong>/<span> 包裹）
                         m = _re.search(
-                            r'<tr[^>]*>.*?武器类型.*?</td>\s*<td[^>]*>(.*?)</td>',
+                            r"<tr[^>]*>.*?武器类型.*?</td>\s*<td[^>]*>(.*?)</td>",
                             html,
                             _re.DOTALL,
                         )
                         if m:
-                            wt = _re.sub(r'<[^>]+>',
-                                         '', m.group(1)).strip()
+                            wt = _re.sub(r"<[^>]+>", "", m.group(1)).strip()
                             affiliated_type = _ZH_TO_EN.get(wt, wt)
 
     return {
@@ -654,8 +656,9 @@ def _parse_detail_item(data: dict, catalogue_id: str,
     }
 
 
-def _parse_list_item(record: dict, catalogue_id: str, entry_id: str,
-                     star_fallback: str = "4") -> dict:
+def _parse_list_item(
+    record: dict, catalogue_id: str, entry_id: str, star_fallback: str = "4"
+) -> dict:
     """
     兜底方案：从 getPage 返回的 record 中提取基本数据。
     仅当 getEntryDetail 失败时使用。
@@ -666,13 +669,20 @@ def _parse_list_item(record: dict, catalogue_id: str, entry_id: str,
 
     # 鸣潮角色共鸣属性 -> 英文（用于 fallback）
     _SKILL_ATTR_EN = {
-        "2": "aero", "3": "electro", "4": "glacio",
-        "5": "fusion", "6": "spectro", "7": "havoc",
+        "2": "aero",
+        "3": "electro",
+        "4": "glacio",
+        "5": "fusion",
+        "6": "spectro",
+        "7": "havoc",
     }
     # 武器类型 -> 英文（用于 fallback）
     _WEAPON_TYPE_EN = {
-        "93": "broadblade", "94": "gauntlets", "95": "sword",
-        "96": "pistols", "97": "rectifier",
+        "93": "broadblade",
+        "94": "gauntlets",
+        "95": "sword",
+        "96": "pistols",
+        "97": "rectifier",
     }
 
     item_type = WIKI_CATALOGUES.get(catalogue_id, "unknown")
@@ -742,26 +752,28 @@ async def wiki_sync_list() -> Response:
                     detail_data = detail_resp.json()
                     if detail_data.get("code") == 200:
                         parsed = _parse_detail_item(
-                            detail_data["data"], cid,
+                            detail_data["data"],
+                            cid,
                             portrait_fallback=record_portrait,
                             star_fallback=record_star,
                         )
                         if parsed:
                             # 武器：如果详情页未解析出武器类型，
                             # 从列表数据的 relateTagIds 兜底
-                            if (cid == "1106"
-                                    and not parsed.get("affiliated_type")):
+                            if cid == "1106" and not parsed.get("affiliated_type"):
                                 fallback = _parse_list_item(
-                                    record, cid, entry_id,
-                                    star_fallback=record_star)
+                                    record, cid, entry_id, star_fallback=record_star
+                                )
                                 if fallback.get("affiliated_type"):
-                                    parsed["affiliated_type"] = (
-                                        fallback["affiliated_type"])
+                                    parsed["affiliated_type"] = fallback[
+                                        "affiliated_type"
+                                    ]
                             return parsed
                 except Exception as e:
                     logger.error(f"getEntryDetail error (id={entry_id}): {e}")
-                return _parse_list_item(record, cid, entry_id,
-                                        star_fallback=record_star)
+                return _parse_list_item(
+                    record, cid, entry_id, star_fallback=record_star
+                )
 
         async with httpx.AsyncClient(timeout=30) as client:
             for cid in catalogue_ids:
@@ -790,9 +802,7 @@ async def wiki_sync_list() -> Response:
                         )
                     )
                     if entry_id:
-                        tasks.append(
-                            _fetch_detail(client, entry_id, record, cid)
-                        )
+                        tasks.append(_fetch_detail(client, entry_id, record, cid))
 
                 items = await asyncio.gather(*tasks)
                 all_items.extend(i for i in items if i)
@@ -811,6 +821,7 @@ async def upload_portrait() -> Response:
     """
     import base64
     import hashlib
+
     try:
         data = await request.get_json()
         b64_str = data.get("image", "")
@@ -834,12 +845,14 @@ async def upload_portrait() -> Response:
 
         logger.info(f"[upload-portrait] 已保存立绘: {file_path} ({len(content)} bytes)")
         relative_path = f"{config_group}/{file_path.name}"
-        return jsonify({
-            "success": True,
-            "path": str(file_path),
-            "relative_path": relative_path,
-            "url": f"/api/portraits/{relative_path}"
-        })
+        return jsonify(
+            {
+                "success": True,
+                "path": str(file_path),
+                "relative_path": relative_path,
+                "url": f"/api/portraits/{relative_path}",
+            }
+        )
     except Exception as e:
         logger.error(f"[upload-portrait] 保存失败: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
@@ -852,7 +865,9 @@ async def portraits_static(filename: str) -> Response:
     try:
         return await send_from_directory(str(portraits_dir), filename)
     except FileNotFoundError:
-        response = await make_response(jsonify({"success": False, "message": "文件不存在"}))
+        response = await make_response(
+            jsonify({"success": False, "message": "文件不存在"})
+        )
         response.status_code = 404
         return response
 
@@ -872,7 +887,9 @@ async def _github_api_get_json(client: httpx.AsyncClient, api_path: str) -> Any:
     resp = await client.get(
         url, headers={"User-Agent": "astrbot-ww-gacha-sim"}, follow_redirects=True
     )
-    logger.info(f"[unpack] 响应状态码: {resp.status_code}, content-type: {resp.headers.get('content-type', 'unknown')}")
+    logger.info(
+        f"[unpack] 响应状态码: {resp.status_code}, content-type: {resp.headers.get('content-type', 'unknown')}"
+    )
     if resp.status_code == 403:
         raise Exception("GitHub API 速率限制已达，请稍后再试")
     content_type = resp.headers.get("content-type", "")
@@ -915,6 +932,7 @@ async def unpack_source_portraits() -> Response:
             skipped_pattern = 0
 
             import re as _re
+
             _luckdraw_pattern = _re.compile(r"^T_Luckdraw.+_UI\.png$")
 
             for item in items:
@@ -935,17 +953,25 @@ async def unpack_source_portraits() -> Response:
                     f"/{default_branch}/{item['path']}"
                 )
                 logger.info(f"[unpack] 构造立绘URL(gh-proxy): {raw_url}")
-                portraits.append({
-                    "name": item["name"],
-                    "raw_url": raw_url,
-                    "size": item.get("size", 0),
-                })
+                portraits.append(
+                    {
+                        "name": item["name"],
+                        "raw_url": raw_url,
+                        "size": item.get("size", 0),
+                    }
+                )
 
             logger.info(
                 f"[unpack] 过滤结果: {len(portraits)} 个立绘文件"
                 f" (跳过 {skipped_dirs} 个目录, {skipped_ext} 个非图片文件, {skipped_pattern} 个非Luckdraw立绘)"
             )
-            return jsonify({"success": True, "portraits": portraits, "default_branch": default_branch})
+            return jsonify(
+                {
+                    "success": True,
+                    "portraits": portraits,
+                    "default_branch": default_branch,
+                }
+            )
     except Exception as e:
         logger.error(f"[unpack] 获取立绘列表失败: {e}")
         return jsonify({"success": False, "message": str(e)})
@@ -1013,7 +1039,9 @@ async def _start_checker():
     """在 Quart 启动前注册：记录运行中的事件循环，供主线程主动停止。"""
     global _running_loop
     _running_loop = asyncio.get_running_loop()
-    logger.info(f"WebUI 服务器已就绪，正在监听 {app.config.get('SERVER_HOST', '0.0.0.0')}:{app.config.get('SERVER_PORT', 5000)}")
+    logger.info(
+        f"WebUI 服务器已就绪，正在监听 {app.config.get('SERVER_HOST', '0.0.0.0')}:{app.config.get('SERVER_PORT', 5000)}"
+    )
 
 
 app.before_serving(_start_checker)
@@ -1044,9 +1072,7 @@ def run(host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
             # asyncio.run() 在 Python 3.12+ 的非主线程中会抛出 RuntimeError
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(
-                app.run_task(host=host, port=port, debug=debug)
-            )
+            loop.run_until_complete(app.run_task(host=host, port=port, debug=debug))
         except Exception as e:
             logger.error(f"WebUI 服务器运行异常: {e}")
             raise
@@ -1075,7 +1101,9 @@ async def run_async(host: str = "0.0.0.0", port: int = 5000, debug: bool = False
 
     try:
         await app.run_task(
-            host=host, port=port, debug=debug,
+            host=host,
+            port=port,
+            debug=debug,
             shutdown_trigger=lambda: _shutdown_event.wait(),
         )
     except asyncio.CancelledError:
@@ -1169,9 +1197,7 @@ if __name__ == "__main__":
         Timer(1.5, open_browser, args=[args.port]).start()
 
         # 使用 Quart 的异步运行
-        asyncio.run(
-            app.run_task(host="0.0.0.0", port=args.port, debug=args.debug)
-        )
+        asyncio.run(app.run_task(host="0.0.0.0", port=args.port, debug=args.debug))
     except Exception as e:
         print(f"启动服务器失败: {e}", file=sys.stderr)
         sys.exit(1)

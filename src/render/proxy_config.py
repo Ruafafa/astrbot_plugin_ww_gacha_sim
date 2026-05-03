@@ -5,6 +5,7 @@
 
 from typing import Any
 from urllib.parse import urlparse
+
 from astrbot.api import logger
 
 
@@ -36,12 +37,16 @@ class ProxyConfig:
             password: 代理密码（可选）
         """
         self.proxy_enabled = True
-        
+
         # 清理URL并检查scheme
         proxy_url = proxy_url.strip()
-        if not (proxy_url.startswith("http://") or proxy_url.startswith("https://") or proxy_url.startswith("socks")):
+        if not (
+            proxy_url.startswith("http://")
+            or proxy_url.startswith("https://")
+            or proxy_url.startswith("socks")
+        ):
             proxy_url = f"http://{proxy_url}"
-            
+
         self.proxy_url = proxy_url
 
         # 如果提供了用户名和密码，构建带认证的代理URL
@@ -62,7 +67,7 @@ class ProxyConfig:
             except Exception:
                 # 解析失败，使用简单替换
                 pass
-                
+
         logger.info(f"设置代理: {log_url}")
 
     def disable_proxy(self):

@@ -3,26 +3,29 @@
 负责实现抽卡结果的可视化渲染
 """
 
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+from typing import TYPE_CHECKING, Any
+
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont
+
 from astrbot.api import logger
 
 from ..item_data.item_manager import Item
 from .ui_resources_manager import UIResourceManager
 
-from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..gacha.cardpool_manager import CardPoolConfig
 
 # 系统中文字体候选列表（按平台优先级排列）
 _SYSTEM_FONT_CANDIDATES = [
-    "msyh.ttc",          # Windows: Microsoft YaHei
-    "msyhbd.ttc",        # Windows: Microsoft YaHei Bold
-    "simhei.ttf",        # Windows: SimHei
-    "PingFang.ttc",      # macOS: PingFang
-    "STHeiti.ttf",       # macOS: STHeiti
+    "msyh.ttc",  # Windows: Microsoft YaHei
+    "msyhbd.ttc",  # Windows: Microsoft YaHei Bold
+    "simhei.ttf",  # Windows: SimHei
+    "PingFang.ttc",  # macOS: PingFang
+    "STHeiti.ttf",  # macOS: STHeiti
     "NotoSansCJK-Regular.ttc",  # Linux: Noto Sans CJK
     "wqy-microhei.ttc",  # Linux: WenQuanYi Micro Hei
 ]
+
 
 # 布局常量配置
 class LayoutConfig:
@@ -32,7 +35,7 @@ class LayoutConfig:
 
     # 十连抽布局
     H_GAP = -50  # 水平间距
-    V_GAP = 30   # 垂直间距
+    V_GAP = 30  # 垂直间距
 
     # 卡池详情布局
     DETAIL_WIDTH = 1000
@@ -47,6 +50,7 @@ class LayoutConfig:
     COLOR_TEXT = (255, 255, 255)
     COLOR_ACCENT = (255, 215, 0)
     COLOR_SUB_TEXT = (200, 200, 200)
+
 
 class GachaRenderer:
     """抽卡结果渲染器"""
@@ -75,7 +79,7 @@ class GachaRenderer:
             try:
                 font = ImageFont.truetype(name, size)
                 break
-            except (OSError, IOError):
+            except OSError:
                 continue
         if font is None:
             font = ImageFont.load_default()
@@ -86,74 +90,92 @@ class GachaRenderer:
         """渲染卡池详细信息"""
         # 引用布局配置
         LC = LayoutConfig
-        
+
         # 基础尺寸
         width = LC.DETAIL_WIDTH
         padding = LC.DETAIL_PADDING
-        
+
         # 字体
         title_font = self._get_font(60)
         header_font = self._get_font(40)
         text_font = self._get_font(30)
         small_font = self._get_font(24)
-        
+
         # 颜色
         bg_color = LC.COLOR_BG
         text_color = LC.COLOR_TEXT
         accent_color = LC.COLOR_ACCENT
         sub_text_color = LC.COLOR_SUB_TEXT
-        
+
         # 预计算内容高度
         content_height = 0
-        
+
         # 标题区域
         content_height += LC.DETAIL_TITLE_HEIGHT
-        
+
         # 1. 基础信息
         content_height += LC.DETAIL_HEADER_HEIGHT
         content_height += LC.DETAIL_ROW_HEIGHT * 2
-        
+
         # 2. 概率设置
         content_height += LC.DETAIL_HEADER_HEIGHT
         content_height += LC.DETAIL_ROW_HEIGHT * 6
-        
+
         # 3. 保底机制
         content_height += LC.DETAIL_HEADER_HEIGHT
-        content_height += 40 * 3 # 5star hard, soft, 4star hard
-        
+        content_height += 40 * 3  # 5star hard, soft, 4star hard
+
         # 4. UP物品
         up_5 = config.rate_up_item_ids.get("5star", [])
         up_4 = config.rate_up_item_ids.get("4star", [])
-        content_height += 60 # Header
-        content_height += 40 * (len(up_5) + len(up_4) + 2) # List + labels
-        
+        content_height += 60  # Header
+        content_height += 40 * (len(up_5) + len(up_4) + 2)  # List + labels
+
         # 5. 包含物品统计
         included_5 = config.included_item_ids.get("5star", [])
         included_4 = config.included_item_ids.get("4star", [])
         included_3 = config.included_item_ids.get("3star", [])
-        content_height += 60 # Header
-        content_height += 40 * 3 # Counts
-        
+        content_height += 60  # Header
+        content_height += 40 * 3  # Counts
+
         # 创建画布
         total_height = content_height + padding * 2
         image = Image.new("RGBA", (width, total_height), bg_color)
         draw = ImageDraw.Draw(image)
-        
+
         y = padding
-        
+
         # --- 标题 ---
-        draw.text((width // 2, y), "卡池配置详情", font=title_font, fill=accent_color, anchor="mt")
+        draw.text(
+            (width // 2, y),
+            "卡池配置详情",
+            font=title_font,
+            fill=accent_color,
+            anchor="mt",
+        )
         y += 80
-        
+
         # 辅助绘制函数
         def draw_section_header(text, current_y):
             draw.text((padding, current_y), text, font=header_font, fill=accent_color)
-            draw.line([(padding, current_y + 45), (width - padding, current_y + 45)], fill=accent_color, width=2)
+            draw.line(
+                [(padding, current_y + 45), (width - padding, current_y + 45)],
+                fill=accent_color,
+                width=2,
+            )
             return current_y + 60
-            
+
         def draw_row(label, value, current_y, font=text_font, indent=0):
-            draw.text((padding + indent, current_y), label, font=font, fill=sub_text_color)
-            draw.text((width - padding, current_y), str(value), font=font, fill=text_color, anchor="ra")
+            draw.text(
+                (padding + indent, current_y), label, font=font, fill=sub_text_color
+            )
+            draw.text(
+                (width - padding, current_y),
+                str(value),
+                font=font,
+                fill=text_color,
+                anchor="ra",
+            )
             return current_y + 40
 
         # --- 1. 基础信息 ---
@@ -161,7 +183,7 @@ class GachaRenderer:
         y = draw_row("卡池名称", config.name, y)
         y = draw_row("卡池ID", config.cp_id, y)
         y += 20
-        
+
         # --- 2. 概率设置 ---
         y = draw_section_header("概率设置", y)
         probs = config.probability_settings
@@ -171,51 +193,55 @@ class GachaRenderer:
         y = draw_row("五星UP概率", f"{probs.get('up_5star_rate', 0.5):.2%}", y)
         y = draw_row("四星UP概率", f"{probs.get('up_4star_rate', 0.5):.2%}", y)
         # _4star_role_rate 看起来像是概率阈值，这里直接显示数值
-        role_rate = probs.get('_4star_role_rate', 0.06)
-        y = draw_row("四星角色判定阈值", f"{role_rate}", y) 
+        role_rate = probs.get("_4star_role_rate", 0.06)
+        y = draw_row("四星角色判定阈值", f"{role_rate}", y)
         y += 20
-        
+
         # --- 3. 保底机制 ---
         y = draw_section_header("保底机制", y)
         prog = config.probability_progression
-        
+
         # 5星硬保底
         p5 = prog.get("5star", {})
         y = draw_row("五星硬保底", f"{p5.get('hard_pity_pull', 80)} 抽", y)
-        
+
         # 5星软保底
         soft_pity = p5.get("soft_pity", [])
         soft_text = "无"
         if soft_pity:
             # 简单展示第一个区间的起点，或者显示范围
-            starts = [str(x['start_pull']) for x in soft_pity]
+            starts = [str(x["start_pull"]) for x in soft_pity]
             soft_text = f"第 {', '.join(starts)} 抽开始提升"
         y = draw_row("五星软保底", soft_text, y)
-        
+
         # 4星硬保底
         p4 = prog.get("4star", {})
         y = draw_row("四星硬保底", f"{p4.get('hard_pity_pull', 10)} 抽", y)
         y += 20
-        
+
         # --- 4. UP物品 ---
         y = draw_section_header("UP物品", y)
-        
+
         if up_5:
             draw.text((padding, y), "五星 UP:", font=text_font, fill=text_color)
             y += 35
             for item in up_5:
-                draw.text((padding + 40, y), f"• {item}", font=small_font, fill=sub_text_color)
+                draw.text(
+                    (padding + 40, y), f"• {item}", font=small_font, fill=sub_text_color
+                )
                 y += 30
         else:
             draw.text((padding, y), "五星 UP: 无", font=text_font, fill=sub_text_color)
             y += 35
-            
+
         y += 10
         if up_4:
             draw.text((padding, y), "四星 UP:", font=text_font, fill=text_color)
             y += 35
             for item in up_4:
-                draw.text((padding + 40, y), f"• {item}", font=small_font, fill=sub_text_color)
+                draw.text(
+                    (padding + 40, y), f"• {item}", font=small_font, fill=sub_text_color
+                )
                 y += 30
         else:
             draw.text((padding, y), "四星 UP: 无", font=text_font, fill=sub_text_color)
@@ -225,19 +251,21 @@ class GachaRenderer:
         # --- 5. 包含物品统计 ---
         y = draw_section_header("卡池内容统计", y)
         y = draw_row("五星物品总数", f"{len(included_5)} 个", y)
-        
+
         # 如果物品数量不多，可以列出名称，或者只显示前几个
         if len(included_5) > 0:
-             # 显示前5个
-             items_str = ", ".join(included_5[:5])
-             if len(included_5) > 5:
-                 items_str += "..."
-             draw.text((padding + 20, y), items_str, font=small_font, fill=(150, 150, 150))
-             y += 30
-             
+            # 显示前5个
+            items_str = ", ".join(included_5[:5])
+            if len(included_5) > 5:
+                items_str += "..."
+            draw.text(
+                (padding + 20, y), items_str, font=small_font, fill=(150, 150, 150)
+            )
+            y += 30
+
         y = draw_row("四星物品总数", f"{len(included_4)} 个", y)
         y = draw_row("三星物品总数", f"{len(included_3)} 个", y)
-        
+
         return image
 
     def _create_single_card(self, item: Item) -> Image.Image:
@@ -324,8 +352,12 @@ class GachaRenderer:
                 # 以图像中心裁剪
                 cx = iw // 2
                 cy = ih // 2
-                crop_box = (cx - crop_w // 2, cy - crop_h // 2,
-                            cx + crop_w // 2, cy + crop_h // 2)
+                crop_box = (
+                    cx - crop_w // 2,
+                    cy - crop_h // 2,
+                    cx + crop_w // 2,
+                    cy + crop_h // 2,
+                )
                 if (crop_w < iw or crop_h < ih) and crop_w > 0 and crop_h > 0:
                     portrait_raw = portrait_raw.crop(crop_box)
 
@@ -384,9 +416,7 @@ class GachaRenderer:
 
         if info_layer:
             ix = (W - info_layer.width) // 2
-            element_bottom_y = H - int(
-                H * LAYOUT["info"]["bottom_offset_ratio"]
-            )
+            element_bottom_y = H - int(H * LAYOUT["info"]["bottom_offset_ratio"])
             iy = element_bottom_y - info_layer.height
             card.paste(info_layer, (ix, iy), info_layer)
 
@@ -425,13 +455,16 @@ class GachaRenderer:
         except Exception as e:
             logger.warning(f"图标加载失败: {e}")
 
-
         # 移除文字渲染层
         return card
 
     def _draw_alpha_text(
-        self, image: Image.Image, pos: tuple[int, int], text: str,
-        font: Any, fill: tuple[int, int, int, int],
+        self,
+        image: Image.Image,
+        pos: tuple[int, int],
+        text: str,
+        font: Any,
+        fill: tuple[int, int, int, int],
     ):
         """绘制带透明度的文字（Pillow 的 draw.text 不支持 RGBA fill）"""
         color = fill[:3]
@@ -450,7 +483,9 @@ class GachaRenderer:
         text_layer = Image.merge("RGBA", (r, g, b, a))
         image.paste(text_layer, (0, 0), text_layer)
 
-    def render_single_pull(self, item: Item, nickname: str = "", user_id: str = "") -> Image.Image:
+    def render_single_pull(
+        self, item: Item, nickname: str = "", user_id: str = ""
+    ) -> Image.Image:
         """渲染单次抽卡结果"""
         card = self._create_single_card(item)
 
@@ -466,7 +501,12 @@ class GachaRenderer:
                     crop_left = (bg_image.width - crop_width) // 2
                     crop_top = (bg_image.height - crop_height) // 2
                     self._cached_single_bg = bg_image.crop(
-                        (crop_left, crop_top, crop_left + crop_width, crop_top + crop_height)
+                        (
+                            crop_left,
+                            crop_top,
+                            crop_left + crop_width,
+                            crop_top + crop_height,
+                        )
                     )
 
                 final_image = self._cached_single_bg.copy()
@@ -490,8 +530,11 @@ class GachaRenderer:
         bbox = font.getbbox(warning_text) or (0, 0, 0, 0)
         text_h = bbox[3] - bbox[1]
         self._draw_alpha_text(
-            final_image, (10, image_height - text_h - 10), warning_text,
-            font=font, fill=(255, 255, 255, 200),
+            final_image,
+            (10, image_height - text_h - 10),
+            warning_text,
+            font=font,
+            fill=(255, 255, 255, 200),
         )
 
         # 2. 用户昵称和ID (右下角)
@@ -509,8 +552,11 @@ class GachaRenderer:
                 id_x = image_width - id_w - right_margin
                 id_y = image_height - id_h - bottom_margin
                 self._draw_alpha_text(
-                    final_image, (id_x, id_y), id_text,
-                    font=text_font, fill=(255, 255, 255, 204),
+                    final_image,
+                    (id_x, id_y),
+                    id_text,
+                    font=text_font,
+                    fill=(255, 255, 255, 204),
                 )
                 bottom_margin += id_h + 5
 
@@ -522,13 +568,18 @@ class GachaRenderer:
                 name_x = image_width - name_w - right_margin
                 name_y = image_height - name_h - bottom_margin
                 self._draw_alpha_text(
-                    final_image, (name_x, name_y), nickname,
-                    font=text_font, fill=(255, 255, 255, 204),
+                    final_image,
+                    (name_x, name_y),
+                    nickname,
+                    font=text_font,
+                    fill=(255, 255, 255, 204),
                 )
 
         return final_image
 
-    def render_ten_pulls(self, results: list[Item], nickname: str = "", user_id: str = "") -> Image.Image:
+    def render_ten_pulls(
+        self, results: list[Item], nickname: str = "", user_id: str = ""
+    ) -> Image.Image:
         """渲染十连抽卡结果"""
         cards_per_row = 5
         rows = (len(results) + cards_per_row - 1) // cards_per_row
@@ -595,8 +646,11 @@ class GachaRenderer:
         bbox = font.getbbox(warning_text) or (0, 0, 0, 0)
         th = bbox[3] - bbox[1]
         self._draw_alpha_text(
-            full_image, (50, image_height - th - 50), warning_text,
-            font=font, fill=(255, 255, 255, 200),
+            full_image,
+            (50, image_height - th - 50),
+            warning_text,
+            font=font,
+            fill=(255, 255, 255, 200),
         )
 
         if nickname or user_id:
@@ -611,8 +665,13 @@ class GachaRenderer:
                 id_h = id_bbox[3] - id_bbox[1]
                 self._draw_alpha_text(
                     full_image,
-                    (image_width - id_w - right_margin, image_height - id_h - bottom_margin + 5),
-                    id_text, font=id_font, fill=(255, 255, 255, 255),
+                    (
+                        image_width - id_w - right_margin,
+                        image_height - id_h - bottom_margin + 5,
+                    ),
+                    id_text,
+                    font=id_font,
+                    fill=(255, 255, 255, 255),
                 )
                 bottom_margin += id_h + 10
 
@@ -622,8 +681,13 @@ class GachaRenderer:
                 name_h = name_bbox[3] - name_bbox[1]
                 self._draw_alpha_text(
                     full_image,
-                    (image_width - name_w - right_margin, image_height - name_h - bottom_margin),
-                    nickname, font=id_font, fill=(255, 255, 255, 255),
+                    (
+                        image_width - name_w - right_margin,
+                        image_height - name_h - bottom_margin,
+                    ),
+                    nickname,
+                    font=id_font,
+                    fill=(255, 255, 255, 255),
                 )
 
         return full_image
@@ -686,7 +750,6 @@ class GachaRenderer:
         # 4. 绘制表格表头
         table_y = filter_y + 60
         table_header_height = 50
-        col_widths = [200, 400, 200, 400]  # 类型, 名称, 数量, 时间
         col_names = ["唤取类型", "唤取物品", "唤取数量", "唤取时间"]
         col_x = [50, 250, 650, 850]  # 起始X坐标
 

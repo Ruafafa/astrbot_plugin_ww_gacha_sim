@@ -8,6 +8,7 @@ import concurrent.futures
 from typing import Any
 
 from astrbot.api import logger
+
 from .database import CommonDatabase
 
 
@@ -130,7 +131,7 @@ class GachaDBOperations:
 
             self.db.execute_update(
                 """
-                INSERT OR REPLACE INTO gacha_states 
+                INSERT OR REPLACE INTO gacha_states
                 (user_id, pity_5star, pity_4star, _5star_guaranteed, _4star_guaranteed, pull_count)
                 VALUES (?, ?, ?, ?, ?, ?)
             """,
@@ -194,7 +195,7 @@ class GachaDBOperations:
             logger.debug(f"保存抽卡记录: {user_id}, 物品: {pull_data['item']}")
             self.db.execute_update(
                 """
-                INSERT INTO pull_history 
+                INSERT INTO pull_history
                 (user_id, item, rarity, pool_id, pull_time)
                 VALUES (?, ?, ?, ?, ?)
             """,
@@ -241,7 +242,7 @@ class GachaDBOperations:
 
             self.db.execute_many(
                 """
-                INSERT INTO pull_history 
+                INSERT INTO pull_history
                 (user_id, item, rarity, pool_id, pull_time)
                 VALUES (?, ?, ?, ?, ?)
             """,
@@ -317,9 +318,7 @@ class GachaDBOperations:
             logger.error(f"加载抽卡历史失败: {user_id}, 错误: {e}")
             raise
 
-    def get_pull_history_count(
-        self, user_id: str, pool_id: str | None = None
-    ) -> int:
+    def get_pull_history_count(self, user_id: str, pool_id: str | None = None) -> int:
         """
         获取用户抽卡历史记录总数
 
@@ -374,7 +373,7 @@ class GachaDBOperations:
             # 获取5星和4星抽卡次数
             rarity_stats_row = self.db.execute_query_single(
                 """
-                SELECT 
+                SELECT
                     COUNT(CASE WHEN rarity = '5star' THEN 1 END) as five_star_pulls,
                     COUNT(CASE WHEN rarity = '4star' THEN 1 END) as four_star_pulls
                 FROM pull_history

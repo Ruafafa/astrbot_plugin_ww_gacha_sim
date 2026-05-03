@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0
 
 ## [Unreleased]
 
+## [v1.1.2] - 2026-05-03
+
+### 🔧 代码质量
+
+- **ruff 格式化**：使用 ruff 工具对全部源码进行 lint 检查和格式化，修复 import 排序、尾随空格、未使用变量、bare except 等问题
+
+---
+
 ## [v1.1.1] - 2026-05-03
 
 ### 🐛 修复

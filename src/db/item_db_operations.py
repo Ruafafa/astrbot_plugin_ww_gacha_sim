@@ -6,6 +6,7 @@
 from typing import Any
 
 from astrbot.api import logger
+
 from .database import CommonDatabase
 
 
@@ -55,7 +56,9 @@ class ItemDBOperations:
                 cursor.execute(f"PRAGMA table_info({table_name})")
                 existing_cols = {row[1] for row in cursor.fetchall()}
                 if "apply_gradient" not in existing_cols:
-                    cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN apply_gradient INTEGER DEFAULT 0")
+                    cursor.execute(
+                        f"ALTER TABLE {table_name} ADD COLUMN apply_gradient INTEGER DEFAULT 0"
+                    )
                     conn.commit()
                     logger.debug(f"为{table_name}表添加 apply_gradient 列")
 
@@ -101,12 +104,7 @@ class ItemDBOperations:
             from pathlib import Path
 
             # CSV文件路径
-            csv_path = (
-                Path(__file__).parent.parent
-                / "assets"
-                / "data"
-                / "default.csv"
-            )
+            csv_path = Path(__file__).parent.parent / "assets" / "data" / "default.csv"
 
             if not csv_path.exists():
                 logger.error(f"默认物品CSV文件不存在: {csv_path}")
@@ -216,9 +214,7 @@ class ItemDBOperations:
             logger.error(f"加载所有物品失败: {e}")
             raise
 
-    def get_item_by_id(
-        self, item_id: str, table_name="items"
-    ) -> dict[str, Any] | None:
+    def get_item_by_id(self, item_id: str, table_name="items") -> dict[str, Any] | None:
         """
         根据物品external_id获取物品详细信息
 
@@ -522,7 +518,6 @@ class ItemDBOperations:
 
             # 如果需要更新配置文件且物品更新成功
             if result > 0 and update_configs and config_manager:
-
                 # 获取物品的旧external_id和新external_id
                 old_external_id = current_item["external_id"]
 
@@ -899,12 +894,7 @@ class ItemDBOperations:
         import csv
         from pathlib import Path
 
-        csv_path = (
-            Path(__file__).parent.parent
-            / "assets"
-            / "data"
-            / "default.csv"
-        )
+        csv_path = Path(__file__).parent.parent / "assets" / "data" / "default.csv"
         if not csv_path.exists():
             logger.warning(f"CSV 文件不存在，跳过物品同步: {csv_path}")
             return 0
@@ -935,9 +925,7 @@ class ItemDBOperations:
                         added += 1
 
         if added > 0:
-            logger.info(
-                f"同步 CSV → {table_name} 完成，新增 {added} 个物品"
-            )
+            logger.info(f"同步 CSV → {table_name} 完成，新增 {added} 个物品")
         return added
 
     def clear_table(self, table_name="items") -> bool:

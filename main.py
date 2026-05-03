@@ -12,17 +12,18 @@ from astrbot.core.message.components import Image
 from .src.db.database import CommonDatabase
 from .src.db.gacha_db_operations import GachaDBOperations
 from .src.db.item_db_operations import ItemDBOperations
+from .src.db.migration import run_migrations
 from .src.gacha.cardpool_manager import CardPoolConfig, CardPoolManager
 from .src.gacha.gacha_flow import GachaFlow
 from .src.gacha.gacha_mechanics import GachaMechanics
 from .src.item_data.item_manager import ItemManager
-from .src.db.migration import run_migrations
 from .src.render.gacha_renderer import GachaRenderer
 from .src.render.local_file_cache_manager import LocalFileCacheManager
 from .src.render.proxy_config import ProxyConfig
 from .src.render.resource_loader import ResourceLoader
 from .src.render.ui_resources_manager import UIResourceManager
-from .src.web.server import run_async as run_webui_async, stop_server_async
+from .src.web.server import run_async as run_webui_async
+from .src.web.server import stop_server_async
 
 
 class WutheringWavesGachaPlugin(Star):
@@ -64,9 +65,7 @@ class WutheringWavesGachaPlugin(Star):
 
         # 数据库迁移：确保升级后数据兼容
         try:
-            run_migrations(
-                self.cdb, self.idb_ops, self.item_manager, self.cp_manager
-            )
+            run_migrations(self.cdb, self.idb_ops, self.item_manager, self.cp_manager)
         except Exception as e:
             logger.error(f"数据库迁移失败（非致命错误）: {e}")
 
@@ -124,15 +123,11 @@ class WutheringWavesGachaPlugin(Star):
 
     @staticmethod
     def _rarity_stars(rarity: str) -> str:
-        return (
-            "★★★★★"
-            if rarity == "5star"
-            else "★★★★"
-            if rarity == "4star"
-            else "★★★"
-        )
+        return "★★★★★" if rarity == "5star" else "★★★★" if rarity == "4star" else "★★★"
 
-    def _find_pool_config(self, pool_identifier: str) -> CardPoolConfig | list[CardPoolConfig] | None:
+    def _find_pool_config(
+        self, pool_identifier: str
+    ) -> CardPoolConfig | list[CardPoolConfig] | None:
         """查找卡池配置，返回 None 表示未找到，返回 list 表示多个重名结果"""
         matched = self.cp_manager.get_config_by_name(pool_identifier)
         if len(matched) > 1:
@@ -147,7 +142,9 @@ class WutheringWavesGachaPlugin(Star):
         config_ids = self.cp_manager.get_config_ids()
 
         if not config_ids:
-            return None, event.plain_result("当前没有可用的卡池配置，请先创建卡池配置文件。")
+            return None, event.plain_result(
+                "当前没有可用的卡池配置，请先创建卡池配置文件。"
+            )
 
         if pool_identifier == "":
             saved_cp_id = await self.get_kv_data(kv_key, default=None)
@@ -275,7 +272,9 @@ class WutheringWavesGachaPlugin(Star):
         try:
             config_ids = self.cp_manager.get_config_ids()
             if not config_ids:
-                yield event.plain_result("当前没有可用的卡池配置，请先创建卡池配置文件。")
+                yield event.plain_result(
+                    "当前没有可用的卡池配置，请先创建卡池配置文件。"
+                )
                 return
 
             lines = ["当前可用的卡池："]
@@ -283,9 +282,7 @@ class WutheringWavesGachaPlugin(Star):
                 try:
                     config = self.cp_manager.get_config_by_cp_id(cp_id)
                     if config.enable:
-                        lines.append(
-                            f"{i}. {config.name} - ID: {config.cp_id}"
-                        )
+                        lines.append(f"{i}. {config.name} - ID: {config.cp_id}")
                 except Exception as e:
                     logger.warning(f"获取卡池 {cp_id} 详情失败: {e}")
                     lines.append(f"{i}. {cp_id} (获取详情失败)")
@@ -295,7 +292,9 @@ class WutheringWavesGachaPlugin(Star):
 
         except Exception as e:
             logger.error(f"获取卡池列表失败: {e}")
-            yield event.plain_result("获取卡池列表时发生错误，请检查插件配置或联系管理员。")
+            yield event.plain_result(
+                "获取卡池列表时发生错误，请检查插件配置或联系管理员。"
+            )
 
     @filter.command("唤取", alias={"选抽", "设置卡池", "选择卡池"})
     async def set_default_pool(
@@ -303,17 +302,23 @@ class WutheringWavesGachaPlugin(Star):
     ):
         try:
             if not pool_identifier:
-                yield event.plain_result("请指定要设置的卡池名称。使用方法：/唤取 <卡池名称>")
+                yield event.plain_result(
+                    "请指定要设置的卡池名称。使用方法：/唤取 <卡池名称>"
+                )
                 return
 
             config_ids = self.cp_manager.get_config_ids()
             if not config_ids:
-                yield event.plain_result("当前没有可用的卡池配置，请先创建卡池配置文件。")
+                yield event.plain_result(
+                    "当前没有可用的卡池配置，请先创建卡池配置文件。"
+                )
                 return
 
             found = self._find_pool_config(pool_identifier)
             if isinstance(found, list):
-                lines = [f"找到 {len(found)} 个名为「{pool_identifier}」的卡池，请选择："]
+                lines = [
+                    f"找到 {len(found)} 个名为「{pool_identifier}」的卡池，请选择："
+                ]
                 for i, c in enumerate(found, 1):
                     lines.append(f"{i}. {c.name} (ID: {c.cp_id})")
                 lines.append("请使用 `/唤取 <卡池ID>` 来指定具体卡池。")
@@ -326,9 +331,7 @@ class WutheringWavesGachaPlugin(Star):
                     try:
                         config = self.cp_manager.get_config_by_cp_id(cp_id)
                         if config.enable:
-                            lines.append(
-                                f"{i}. {config.name} - ID: {config.cp_id}"
-                            )
+                            lines.append(f"{i}. {config.name} - ID: {config.cp_id}")
                     except Exception as e:
                         logger.warning(f"获取卡池 {cp_id} 详情失败: {e}")
                         lines.append(f"{i}. {cp_id} (获取详情失败)")
@@ -351,12 +354,12 @@ class WutheringWavesGachaPlugin(Star):
 
         except Exception as e:
             logger.error(f"设置默认卡池失败: {e}")
-            yield event.plain_result("设置默认卡池时发生错误，请检查插件配置或联系管理员。")
+            yield event.plain_result(
+                "设置默认卡池时发生错误，请检查插件配置或联系管理员。"
+            )
 
     @filter.command("唤取记录", alias={"抽卡记录", "查看抽卡", "抽卡历史"})
-    async def view_pull_history(
-        self, event: AstrMessageEvent, page_or_pool: str = "1"
-    ):
+    async def view_pull_history(self, event: AstrMessageEvent, page_or_pool: str = "1"):
         try:
             sender_id = str(event.get_sender_id())
             page_size = 10
@@ -384,9 +387,7 @@ class WutheringWavesGachaPlugin(Star):
                         ]
                         for i, c in enumerate(found, 1):
                             lines.append(f"{i}. {c.name} - ID: {c.cp_id}")
-                        lines.append(
-                            "请使用 `/抽卡记录 <卡池ID>` 来指定具体卡池。"
-                        )
+                        lines.append("请使用 `/抽卡记录 <卡池ID>` 来指定具体卡池。")
                         yield event.plain_result("\n".join(lines))
                         return
                     if found is not None:
@@ -400,9 +401,7 @@ class WutheringWavesGachaPlugin(Star):
                             try:
                                 config = self.cp_manager.get_config_by_cp_id(cp_id)
                                 if config.enable:
-                                    lines.append(
-                                        f"{i}. {config.name} - ID: {cp_id}"
-                                    )
+                                    lines.append(f"{i}. {config.name} - ID: {cp_id}")
                             except Exception as e:
                                 logger.warning(f"获取卡池 {cp_id} 详情失败: {e}")
                                 lines.append(f"{i}. {cp_id} (获取详情失败)")
@@ -439,9 +438,7 @@ class WutheringWavesGachaPlugin(Star):
 
             if self.enable_rendering:
                 all_items = self.item_manager.get_all_items()
-                name_to_type = {
-                    d["name"]: d["type"] for d in all_items.values()
-                }
+                name_to_type = {d["name"]: d["type"] for d in all_items.values()}
                 enriched_history = []
                 for record in pull_history:
                     r = record.copy()
@@ -483,9 +480,7 @@ class WutheringWavesGachaPlugin(Star):
             )
 
     @filter.command("卡池详细")
-    async def pool_detail(
-        self, event: AstrMessageEvent, pool_identifier: str
-    ):
+    async def pool_detail(self, event: AstrMessageEvent, pool_identifier: str):
         try:
             found = self._find_pool_config(pool_identifier)
             if isinstance(found, list):
@@ -495,18 +490,14 @@ class WutheringWavesGachaPlugin(Star):
                 )
                 return
             if found is None:
-                yield event.plain_result(
-                    f"未找到匹配的卡池: {pool_identifier}"
-                )
+                yield event.plain_result(f"未找到匹配的卡池: {pool_identifier}")
                 return
 
             if not self.enable_rendering:
                 yield event.plain_result("未启用渲染功能，无法生成卡池详情图。")
                 return
 
-            image = await asyncio.to_thread(
-                self.renderer.render_pool_detail, found
-            )
+            image = await asyncio.to_thread(self.renderer.render_pool_detail, found)
             yield event.chain_result(self._image_as_chain(image))
 
         except Exception as e:
@@ -525,8 +516,8 @@ class WutheringWavesGachaPlugin(Star):
     @filter.command("wgs_help", alias={"抽卡帮助", "鸣潮帮助"})
     async def wgs_help(self, event: AstrMessageEvent):
         try:
-            from astrbot.core.star.star_handler import star_handlers_registry
             from astrbot.core.star.filter.command import CommandFilter
+            from astrbot.core.star.star_handler import star_handlers_registry
 
             handlers = star_handlers_registry.get_handlers_by_module_name(
                 self.__module__
@@ -545,9 +536,7 @@ class WutheringWavesGachaPlugin(Star):
                     primary = names[0]
                     aliases = [n for n in names[1:] if n != primary][:3]
                     desc = handler.desc or "无说明"
-                    alias_str = (
-                        f"（{'/'.join(aliases)}）" if aliases else ""
-                    )
+                    alias_str = f"（{'/'.join(aliases)}）" if aliases else ""
                     parts.append(f"  /{primary} {alias_str}\n    {desc}")
 
             parts.sort()

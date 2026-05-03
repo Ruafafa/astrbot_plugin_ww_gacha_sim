@@ -5,18 +5,15 @@ import time
 from pathlib import Path
 
 from PIL import Image
+
 from astrbot.api import logger
 from astrbot.api.star import StarTools
-
-from . import PLUGIN_PATH
 
 
 class LocalFileCacheManager:
     """本地文件缓存管理器"""
 
-    def __init__(
-        self, cache_dir: Path | None = None, cleanup_interval: int = 24
-    ):
+    def __init__(self, cache_dir: Path | None = None, cleanup_interval: int = 24):
         """
         初始化缓存管理器
 
@@ -25,7 +22,9 @@ class LocalFileCacheManager:
             cleanup_interval: 缓存清理周期（单位：小时），默认24小时
         """
         if cache_dir is None:
-            self.cache_dir = Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim")) / "cache"
+            self.cache_dir = (
+                Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim")) / "cache"
+            )
         else:
             self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)

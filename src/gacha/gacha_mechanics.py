@@ -99,7 +99,7 @@ class GachaMechanics:
             # 如果配置缺失或为空，仅返回基础概率（防止崩溃，但可能不符合预期）
             # 实际上硬保底逻辑在上面已经处理了，所以这里返回基础概率是安全的兜底
             return min(final_prob, 1.0)
-            
+
         sorted_pity = sorted(sorted_pity, key=lambda x: x["start_pull"])
 
         # 2. 遍历每一个区间
@@ -265,10 +265,16 @@ class GachaMechanics:
             new_pity_5star += 1
 
             # 检测是否抽到了四星武器
-            item_type = "character" if random.random() > _4star_weapon_rate else "weapon"
+            item_type = (
+                "character" if random.random() > _4star_weapon_rate else "weapon"
+            )
 
             # 尝试获取四星物品
-            is_up = (not _4star_guaranteed and rate_up_4star_ids and random.random() < up_4star_rate)
+            is_up = (
+                not _4star_guaranteed
+                and rate_up_4star_ids
+                and random.random() < up_4star_rate
+            )
             local_item = self._get_item_with_fallback(
                 base_rarity="4star",
                 is_up=is_up,

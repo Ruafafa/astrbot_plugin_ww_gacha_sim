@@ -36,7 +36,10 @@ class CommonDatabase:
             db_path: 数据库文件路径
         """
         if db_path is None:
-            self.db_path = Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim")) / "ww_gacha_sim_data.db"
+            self.db_path = (
+                Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim"))
+                / "ww_gacha_sim_data.db"
+            )
         else:
             self.db_path = db_path
         self._ensure_directory_exists()
@@ -61,7 +64,9 @@ class CommonDatabase:
             try:
                 self._local.conn = sqlite3.connect(self.db_path)
                 self._local.conn.execute("PRAGMA foreign_keys = ON")  # 启用外键约束
-                self._local.conn.execute("PRAGMA journal_mode = WAL")  # 启用WAL模式，提高并发性能
+                self._local.conn.execute(
+                    "PRAGMA journal_mode = WAL"
+                )  # 启用WAL模式，提高并发性能
             except sqlite3.Error as e:
                 logger.error(f"数据库连接错误: {e}")
                 raise
@@ -81,7 +86,7 @@ class CommonDatabase:
     def get_connection(self):
         """
         获取数据库连接上下文
-        
+
         注意：现在复用线程局部连接，不再每次都关闭。
         """
         conn = self._get_thread_local_connection()

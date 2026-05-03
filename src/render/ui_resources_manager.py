@@ -12,10 +12,10 @@ from typing import cast
 from PIL import Image
 
 from .local_file_cache_manager import LocalFileCacheManager
-
-PLUGIN_PATH = Path(__file__).resolve().parent.parent.parent
 from .proxy_config import ProxyConfig
 from .resource_loader import ResourceLoader
+
+PLUGIN_PATH = Path(__file__).resolve().parent.parent.parent
 
 
 def safe_json_load(file_path: Path) -> dict:
