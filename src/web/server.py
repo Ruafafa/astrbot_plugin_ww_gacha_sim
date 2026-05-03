@@ -977,9 +977,10 @@ async def static_files(filename: str) -> Response:
 def _patch_signal_for_thread():
     """
     非主线程中 Hypercorn 注册信号处理器会失败。
-    将 signal.signal 包装为静默降级，避免 ValueError。
+    将 signal.signal / signal.set_wakeup_fd 包装为静默降级，避免 ValueError / RuntimeError。
     """
     original_signal = signal.signal
+    original_set_wakeup_fd = signal.set_wakeup_fd
 
     def _patched_signal(signalnum, handler, /):
         try:
@@ -987,11 +988,19 @@ def _patch_signal_for_thread():
         except ValueError:
             return None
 
+    def _patched_set_wakeup_fd(fd, /, *, warn_on_full_buffer=True):
+        try:
+            return original_set_wakeup_fd(fd, warn_on_full_buffer=warn_on_full_buffer)
+        except RuntimeError:
+            return -1
+
     signal.signal = _patched_signal
+    signal.set_wakeup_fd = _patched_set_wakeup_fd
     try:
         yield
     finally:
         signal.signal = original_signal
+        signal.set_wakeup_fd = original_set_wakeup_fd
 
 
 # WebUI 关闭信号（由插件 terminate 调用）
