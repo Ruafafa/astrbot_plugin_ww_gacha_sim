@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import io
-import threading
 import time
 from pathlib import Path
 
@@ -23,7 +22,7 @@ from .src.render.local_file_cache_manager import LocalFileCacheManager
 from .src.render.proxy_config import ProxyConfig
 from .src.render.resource_loader import ResourceLoader
 from .src.render.ui_resources_manager import UIResourceManager
-from .src.web.server import stop_server, run as run_webui, run_async as run_webui_async, stop_server_async
+from .src.web.server import run_async as run_webui_async, stop_server_async
 
 
 class WutheringWavesGachaPlugin(Star):
@@ -72,31 +71,20 @@ class WutheringWavesGachaPlugin(Star):
             logger.error(f"数据库迁移失败（非致命错误）: {e}")
 
         # WebUI 自动启动
-        self._webui_thread = None
         self._webui_task = None
         if self.config.get("enable_webui", False):
             webui_port = int(self.config.get("webui_port", 5000))
             logger.info(f"WebUI 配置已启用，正在启动 (0.0.0.0:{webui_port})...")
             try:
-                # 优先使用 asyncio 任务（主事件循环），避免线程下
-                # signal.set_wakeup_fd / add_signal_handler 的限制
-                try:
-                    loop = asyncio.get_running_loop()
-                    self._webui_task = loop.create_task(
-                        run_webui_async(host="0.0.0.0", port=webui_port, debug=False)
-                    )
-                    logger.info(f"WebUI 已通过 asyncio 任务启动 (0.0.0.0:{webui_port})")
-                except RuntimeError:
-                    # 没有运行中的事件循环，回退到线程方式
-                    self._webui_thread = threading.Thread(
-                        target=run_webui,
-                        kwargs={"host": "0.0.0.0", "port": webui_port, "debug": False},
-                        daemon=True,
-                    )
-                    self._webui_thread.start()
-                    logger.info(f"WebUI 已通过后台线程启动 (0.0.0.0:{webui_port})")
+                # 在 AstrBot 主事件循环中作为 asyncio 任务运行 WebUI，
+                # 避免非主线程下 signal.set_wakeup_fd / add_signal_handler 的限制
+                loop = asyncio.get_running_loop()
+                self._webui_task = loop.create_task(
+                    run_webui_async(host="0.0.0.0", port=webui_port, debug=False)
+                )
+                logger.info(f"WebUI 已通过 asyncio 任务启动 (0.0.0.0:{webui_port})")
             except Exception as e:
-                logger.error(f"WebUI 后台服务启动失败: {e}")
+                logger.error(f"WebUI 启动失败: {e}")
         else:
             logger.info("WebUI 未启用 (enable_webui=False)")
 
@@ -572,7 +560,7 @@ class WutheringWavesGachaPlugin(Star):
 
     async def terminate(self):
         if self._webui_task:
-            logger.info("正在停止 WebUI (asyncio 任务)...")
+            logger.info("正在停止 WebUI...")
             await stop_server_async()
             try:
                 await asyncio.wait_for(self._webui_task, timeout=10)
@@ -586,8 +574,4 @@ class WutheringWavesGachaPlugin(Star):
             except asyncio.CancelledError:
                 pass
             self._webui_task = None
-        if self._webui_thread and self._webui_thread.is_alive():
-            logger.info("正在停止 WebUI (后台线程)...")
-            stop_server()
-            self._webui_thread = None
         logger.info("鸣潮模拟抽卡插件已卸载")

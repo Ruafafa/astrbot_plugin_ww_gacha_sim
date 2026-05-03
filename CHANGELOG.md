@@ -18,7 +18,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0
 
 ### 🔄 优化
 
-- **WebUI 生命周期管理**：提前初始化 `_webui_thread` 为 `None`，简化 `terminate` 方法中的守护线程清理逻辑
 - **死代码清理**：移除 `ui_resources_manager.py` 中冗余的 `hasattr` 守卫判断
 - **重复导入**：将 `proxy_config.py` 中 `urlparse` 的局部导入提升到模块级别，消除重复
 - **未使用参数**：移除 `ResourceLoader.__init__` 中未被使用的 `proxy` 参数
@@ -26,7 +25,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0
 ### 💬 日志
 
 - **WebUI 启动日志增强**：添加 WebUI 服务启动、就绪、停止全生命周期的日志输出，便于 Docker 环境下排查连接问题
-- **WebUI 双模式切换日志**：`main.py` 根据事件循环状态自动选择 asyncio 任务或线程回退模式，并输出对应的启动日志
 
 ---
 
