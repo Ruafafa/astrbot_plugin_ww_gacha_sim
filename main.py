@@ -74,7 +74,8 @@ class WutheringWavesGachaPlugin(Star):
         # WebUI 自动启动
         self._webui_thread = None
         if self.config.get("enable_webui", False):
-            webui_port = self.config.get("webui_port", 5000)
+            webui_port = int(self.config.get("webui_port", 5000))
+            logger.info(f"WebUI 配置已启用，正在启动后台服务 (0.0.0.0:{webui_port})...")
             try:
                 self._webui_thread = threading.Thread(
                     target=run_webui,
@@ -82,9 +83,11 @@ class WutheringWavesGachaPlugin(Star):
                     daemon=True,
                 )
                 self._webui_thread.start()
-                logger.info(f"WebUI 已自动启动于 http://0.0.0.0:{webui_port}")
+                logger.info(f"WebUI 线程已创建并启动 (daemon=True)，正在监听 0.0.0.0:{webui_port}")
             except Exception as e:
-                logger.error(f"启动 WebUI 失败: {e}")
+                logger.error(f"WebUI 后台服务启动失败: {e}")
+        else:
+            logger.info("WebUI 未启用 (enable_webui=False)")
 
         logger.info("鸣潮模拟抽卡插件已初始化")
 

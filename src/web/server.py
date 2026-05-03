@@ -1004,6 +1004,7 @@ async def _start_checker():
     """在 Quart 启动前注册：记录运行中的事件循环，供主线程主动停止。"""
     global _running_loop
     _running_loop = asyncio.get_running_loop()
+    logger.info(f"WebUI 服务器已就绪，正在监听 {app.config.get('SERVER_HOST', '0.0.0.0')}:{app.config.get('SERVER_PORT', 5000)}")
 
 
 app.before_serving(_start_checker)
@@ -1011,19 +1012,40 @@ app.before_serving(_start_checker)
 
 def stop_server():
     """设置关闭信号，并主动停止 server 的事件循环。"""
+    logger.info("正在停止 WebUI 服务...")
     shutdown_event.set()
     if _running_loop and _running_loop.is_running():
+        logger.debug("正在向事件循环发送停止信号...")
         _running_loop.call_soon_threadsafe(_running_loop.stop)
+    else:
+        logger.warning("WebUI 事件循环未运行，跳过停止")
 
 
 def run(host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
     """运行 Quart Web 服务器（同步入口，用于在线程中启动）。"""
     app.config["DEBUG"] = debug
+    app.config["SERVER_HOST"] = host
+    app.config["SERVER_PORT"] = port
+
+    logger.info(f"WebUI 服务器正在启动，监听 {host}:{port}")
 
     with _patch_signal_for_thread():
-        asyncio.run(app.run_task(host=host, port=port, debug=debug))
+        try:
+            # 在非主线程中使用 new_event_loop 替代 asyncio.run
+            # asyncio.run() 在 Python 3.12+ 的非主线程中会抛出 RuntimeError
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(
+                app.run_task(host=host, port=port, debug=debug)
+            )
+        except Exception as e:
+            logger.error(f"WebUI 服务器运行异常: {e}")
+            raise
+        finally:
+            loop.close()
 
     _running_loop = None
+    logger.info("WebUI 服务器已停止")
 
 
 def parse_arguments():

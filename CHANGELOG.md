@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0
 
 - **JSONDecodeError 崩溃**：修复 `safe_json_load` 抛出 `JSONDecodeError` 时参数错误导致的异常
 - **bare except**：将捕获所有异常的裸 `except:` 替换为 `except Exception`
+- **Docker 环境 WebUI 无法访问**：`asyncio.run()` 在 Python 3.12+ 的非主线程中会抛出 `RuntimeError`，改用 `new_event_loop` + `run_until_complete` 以兼容后台线程启动
 
 ### 🔄 优化
 
@@ -21,6 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0
 - **死代码清理**：移除 `ui_resources_manager.py` 中冗余的 `hasattr` 守卫判断
 - **重复导入**：将 `proxy_config.py` 中 `urlparse` 的局部导入提升到模块级别，消除重复
 - **未使用参数**：移除 `ResourceLoader.__init__` 中未被使用的 `proxy` 参数
+
+### 💬 日志
+
+- **WebUI 启动日志增强**：添加 WebUI 服务启动、就绪、停止全生命周期的日志输出，便于 Docker 环境下排查连接问题
 
 ---
 
