@@ -4,11 +4,15 @@ import json
 import os
 import signal
 import sys
+import threading
+import uuid
 import webbrowser
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Timer
 from typing import Any
+
+import httpx
 
 from astrbot.api import logger
 from astrbot.api.star import StarTools
@@ -35,8 +39,8 @@ class ItemRequest(BaseModel):
     rarity: str
     type: str
     affiliated_type: str | None = None
-    portrait_path: str | None = None
     portrait_url: str | None = None
+    apply_gradient: bool | None = None
     external_id: str | None = None
     config_group: str = "default"
 
@@ -47,21 +51,15 @@ class ItemUpdateRequest(BaseModel):
     rarity: str | None = None
     type: str | None = None
     affiliated_type: str | None = None
-    portrait_path: str | None = None
     portrait_url: str | None = None
+    apply_gradient: bool | None = None
     config_group: str = "default"
 
 
-# 定义插件路径
-PLUGIN_PATH = Path(__file__).parent.parent.parent
-
-# 添加项目根目录到Python路径，以便导入db模块
-sys.path.insert(0, str(PLUGIN_PATH))
-
 # 导入数据库操作类
-from src.db.database import CommonDatabase
-from src.db.item_db_operations import ItemDBOperations
-from src.gacha.cardpool_manager import CardPoolManager
+from ..db.database import CommonDatabase
+from ..db.item_db_operations import ItemDBOperations
+from ..gacha.cardpool_manager import CardPoolManager
 
 # 创建数据库实例
 db = CommonDatabase()
@@ -81,7 +79,17 @@ app.config["DEBUG"] = False  # 默认关闭调试模式，使用 --debug 参数�
 # 处理 CORS（前端与后端同源时不需要，但为开发环境保留）
 @app.after_request
 async def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
+    origin = request.headers.get("Origin", "")
+    if app.config["DEBUG"]:
+        # 调试模式允许所有来源
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    elif origin and (
+        origin.startswith("http://localhost")
+        or origin.startswith("http://127.0.0.1")
+    ):
+        response.headers["Access-Control-Allow-Origin"] = origin
+    else:
+        response.headers["Access-Control-Allow-Origin"] = "http://localhost"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     return response
@@ -580,16 +588,416 @@ async def items() -> Response:
         return jsonify({"success": False, "message": "不支持的请求方法"})
 
 
+# 库街区Wiki同步
+KUROBBS_API_BASE = "https://api.kurobbs.com"
+WIKI_CATALOGUES = {"1105": "character", "1106": "weapon"}
+
+# 中文字段名 → 英文类型标识（供前端及CSV使用）
+_ZH_TO_EN = {
+    # 元素属性
+    "气动": "aero", "导电": "electro", "冷凝": "glacio",
+    "热熔": "fusion", "衍射": "spectro", "湮灭": "havoc",
+    # 武器类型
+    "长刃": "broadblade", "臂铠": "gauntlets", "迅刀": "sword",
+    "佩枪": "pistols", "音感仪": "rectifier",
+}
+
+
+def _generate_devcode() -> str:
+    """生成类似 Kurobbs 前端的 devcode（32位hex）"""
+    return uuid.uuid4().hex[:32]
+
+
+def _parse_detail_item(data: dict, catalogue_id: str,
+                        portrait_fallback: str = "",
+                        star_fallback: str = "4") -> dict | None:
+    """
+    解析 getEntryDetail 返回的 data，提取物品信息。
+
+    角色（catalogue 1105）：从 role-component → role.figures[] 取高清立绘，
+    从 role.info 中解析"属性：XXX"映射为英文类型标识。
+
+    武器（catalogue 1106）：从 modules[0] → components[0]
+    (tabs-component) 的 HTML 表格中提取第一个 <img> 作为立绘，
+    从"武器类型"行提取武器类型。
+
+    返回 None 表示无法解析（如 title 为空）。
+    """
+    import re as _re
+
+    content = data.get("content", {})
+    title = content.get("title", "")
+    if not title:
+        return None
+
+    star = str(content.get("star", star_fallback))
+    modules = content.get("modules", [])
+
+    item_type = WIKI_CATALOGUES.get(catalogue_id, "unknown")
+    affiliated_type = ""
+    portrait_url = content.get("contentUrl", portrait_fallback)
+
+    for module in modules:
+        for comp in module.get("components", []):
+            comp_type = comp.get("type", "")
+
+            if comp_type == "role-component":
+                role = comp.get("role", {})
+                item_type = "character"
+
+                figures = role.get("figures", [])
+                if figures and figures[0].get("url"):
+                    portrait_url = figures[0]["url"]
+                elif not portrait_url:
+                    portrait_url = role.get("backgroundImage", "")
+
+                for info_item in role.get("info", []):
+                    text = info_item.get("text", "")
+                    if text.startswith("属性："):
+                        cn = text[len("属性："):]
+                        affiliated_type = _ZH_TO_EN.get(cn, cn)
+
+            # 武器：从 modules[0] → components[0] (tabs-component) 的 HTML 中解析
+            if catalogue_id == "1106" and not affiliated_type:
+                if modules and modules[0].get("components"):
+                    first_comp = modules[0]["components"][0]
+                    if first_comp.get("type") == "tabs-component":
+                        html = first_comp.get("content", "")
+                        if not html:
+                            continue
+                        # 第一个 img src 即为武器立绘
+                        if not portrait_url or portrait_url == portrait_fallback:
+                            m = _re.search(r'<img[^>]+src="([^"]+)"', html)
+                            if m:
+                                portrait_url = m.group(1)
+                        # 提取"武器类型"行的值（标签可能被 <strong>/<span> 包裹）
+                        m = _re.search(
+                            r'<tr[^>]*>.*?武器类型.*?</td>\s*<td[^>]*>(.*?)</td>',
+                            html,
+                            _re.DOTALL,
+                        )
+                        if m:
+                            wt = _re.sub(r'<[^>]+>',
+                                         '', m.group(1)).strip()
+                            affiliated_type = _ZH_TO_EN.get(wt, wt)
+
+    return {
+        "name": title,
+        "catalogueId": catalogue_id,
+        "type": item_type,
+        "star": star,
+        "contentUrl": portrait_url,
+        "affiliated_type": affiliated_type,
+    }
+
+
+def _parse_list_item(record: dict, catalogue_id: str, entry_id: str,
+                     star_fallback: str = "4") -> dict:
+    """
+    兜底方案：从 getPage 返回的 record 中提取基本数据。
+    仅当 getEntryDetail 失败时使用。
+    """
+    content = record.get("content", {})
+    skill_attr = content.get("skillAttr")
+    weapon_tags = content.get("relateTagIds", [])
+
+    # 鸣潮角色共鸣属性 -> 英文（用于 fallback）
+    _SKILL_ATTR_EN = {
+        "2": "aero", "3": "electro", "4": "glacio",
+        "5": "fusion", "6": "spectro", "7": "havoc",
+    }
+    # 武器类型 -> 英文（用于 fallback）
+    _WEAPON_TYPE_EN = {
+        "93": "broadblade", "94": "gauntlets", "95": "sword",
+        "96": "pistols", "97": "rectifier",
+    }
+
+    item_type = WIKI_CATALOGUES.get(catalogue_id, "unknown")
+    affiliated_type = ""
+
+    if weapon_tags and str(weapon_tags[0]) in _WEAPON_TYPE_EN:
+        item_type = "weapon"
+        affiliated_type = _WEAPON_TYPE_EN.get(str(weapon_tags[0]), "")
+    elif skill_attr is not None:
+        item_type = "character"
+        affiliated_type = _SKILL_ATTR_EN.get(str(skill_attr), "")
+
+    return {
+        "name": record.get("name", ""),
+        "catalogueId": catalogue_id,
+        "type": item_type,
+        "star": str(content.get("star", star_fallback)),
+        "contentUrl": content.get("contentUrl", ""),
+        "affiliated_type": affiliated_type,
+    }
+
+
+@app.route("/api/wiki/sync-list", methods=["POST"])
+async def wiki_sync_list() -> Response:
+    """
+    从库街区Wiki同步角色/武器列表。
+
+    流程：
+      1. getPage 获取全量条目列表（含 entryId）
+      2. 对每个 entryId 调用 getEntryDetail 获取精确数据
+         （角色：role-component → role.info 属性字段 /
+           武器：tabs-component/basic-component → HTML 表格武器类型行）
+      3. getEntryDetail 失败时降级为 getPage 数据（relateTagIds 兜底武器类型）
+
+    POST body: {"catalogue_ids": ["1105", "1106"]}
+    """
+    try:
+        data = await request.get_json() or {}
+        catalogue_ids = data.get("catalogue_ids", ["1105", "1106"])
+
+        devcode = _generate_devcode()
+        headers = {
+            "source": "h5",
+            "wiki_type": "9",
+            "devcode": devcode,
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+
+        all_items = []
+        sem = asyncio.Semaphore(10)
+
+        async def _fetch_detail(
+            client: httpx.AsyncClient, entry_id: str, record: dict, cid: str
+        ) -> dict | None:
+            """并发获取详情，失败则降级。"""
+            record_content = record.get("content", {})
+            record_star = str(record_content.get("star", "4"))
+            record_portrait = record_content.get("contentUrl", "")
+
+            async with sem:
+                try:
+                    detail_resp = await client.post(
+                        f"{KUROBBS_API_BASE}/wiki/core/catalogue/item/getEntryDetail",
+                        headers=headers,
+                        data=f"id={entry_id}",
+                    )
+                    detail_data = detail_resp.json()
+                    if detail_data.get("code") == 200:
+                        parsed = _parse_detail_item(
+                            detail_data["data"], cid,
+                            portrait_fallback=record_portrait,
+                            star_fallback=record_star,
+                        )
+                        if parsed:
+                            # 武器：如果详情页未解析出武器类型，
+                            # 从列表数据的 relateTagIds 兜底
+                            if (cid == "1106"
+                                    and not parsed.get("affiliated_type")):
+                                fallback = _parse_list_item(
+                                    record, cid, entry_id,
+                                    star_fallback=record_star)
+                                if fallback.get("affiliated_type"):
+                                    parsed["affiliated_type"] = (
+                                        fallback["affiliated_type"])
+                            return parsed
+                except Exception as e:
+                    logger.error(f"getEntryDetail error (id={entry_id}): {e}")
+                return _parse_list_item(record, cid, entry_id,
+                                        star_fallback=record_star)
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            for cid in catalogue_ids:
+                # Step 1: 获取条目列表
+                resp = await client.post(
+                    f"{KUROBBS_API_BASE}/wiki/core/catalogue/item/getPage",
+                    headers=headers,
+                    data=f"catalogueId={cid}&page=1&limit=1000",
+                )
+                resp_data = resp.json()
+                if resp_data.get("code") != 200:
+                    logger.error(f"getPage error (catalogueId={cid}): {resp_data}")
+                    continue
+
+                records = (
+                    resp_data.get("data", {}).get("results", {}).get("records", [])
+                )
+
+                # Step 2: 并发获取详情
+                tasks = []
+                for record in records:
+                    content = record.get("content", {})
+                    entry_id = str(
+                        content.get("linkConfig", {}).get(
+                            "entryId", content.get("entryId", "")
+                        )
+                    )
+                    if entry_id:
+                        tasks.append(
+                            _fetch_detail(client, entry_id, record, cid)
+                        )
+
+                items = await asyncio.gather(*tasks)
+                all_items.extend(i for i in items if i)
+
+        return jsonify({"success": True, "items": all_items})
+    except Exception as e:
+        logger.error(f"Wiki sync-list failed: {e}")
+        return jsonify({"success": False, "message": str(e)})
+
+
+# 前端处理后的立绘上传保存（纯存储，不做任何像素处理）
+@app.route("/api/items/upload-portrait", methods=["POST"])
+async def upload_portrait() -> Response:
+    """接收前端已裁剪/缩剪/渐变处理完毕的立绘 PNG blob，保存到本地。
+    文件名由原始 portrait_url 的哈希决定，同一来源始终只有一份处理结果。
+    """
+    import base64
+    import hashlib
+    try:
+        data = await request.get_json()
+        b64_str = data.get("image", "")
+        portrait_url = data.get("portrait_url", "") or ""
+        config_group = data.get("config_group", "default")
+
+        content = base64.b64decode(b64_str)
+        data_dir = DEFAULT_CONFIG_DIR.parent
+        portraits_dir = data_dir / "portraits" / config_group
+        portraits_dir.mkdir(parents=True, exist_ok=True)
+
+        # 用原始 URL 的哈希作为文件名，同一来源多次处理只保留最新结果
+        if portrait_url:
+            key = hashlib.md5(portrait_url.encode()).hexdigest()[:12]
+        else:
+            key = hashlib.md5(content).hexdigest()[:12]
+        file_path = portraits_dir / f"{key}.png"
+
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        logger.info(f"[upload-portrait] 已保存立绘: {file_path} ({len(content)} bytes)")
+        relative_path = f"{config_group}/{file_path.name}"
+        return jsonify({
+            "success": True,
+            "path": str(file_path),
+            "relative_path": relative_path,
+            "url": f"/api/portraits/{relative_path}"
+        })
+    except Exception as e:
+        logger.error(f"[upload-portrait] 保存失败: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/portraits/<path:filename>", methods=["GET"])
+async def portraits_static(filename: str) -> Response:
+    """提供本地存储的处理后立绘文件访问"""
+    portraits_dir = DEFAULT_CONFIG_DIR.parent / "portraits"
+    try:
+        return await send_from_directory(str(portraits_dir), filename)
+    except FileNotFoundError:
+        response = await make_response(jsonify({"success": False, "message": "文件不存在"}))
+        response.status_code = 404
+        return response
+
+
 # 静态资源服务
-@app.route("/")
+
+_UNPACK_OWNER = "TomyJan"
+_UNPACK_REPO = "WutheringWaves-UIResources"
+_UNPACK_PORTRAIT_PATH = "UIResources/Common/Image/Luckdraw"
+_UNPACK_GH_PROXY = "https://gh-proxy.com/"
+
+
+async def _github_api_get_json(client: httpx.AsyncClient, api_path: str) -> Any:
+    """调用 GitHub REST API 并返回 JSON，含友好的错误处理。"""
+    url = f"https://api.github.com/repos/{_UNPACK_OWNER}/{_UNPACK_REPO}{api_path}"
+    logger.info(f"[unpack] 请求 URL: {url}")
+    resp = await client.get(
+        url, headers={"User-Agent": "astrbot-ww-gacha-sim"}, follow_redirects=True
+    )
+    logger.info(f"[unpack] 响应状态码: {resp.status_code}, content-type: {resp.headers.get('content-type', 'unknown')}")
+    if resp.status_code == 403:
+        raise Exception("GitHub API 速率限制已达，请稍后再试")
+    content_type = resp.headers.get("content-type", "")
+    text_preview = resp.text[:200]
+    if resp.status_code == 404:
+        raise Exception(f"路径不存在 (HTTP 404): {text_preview}")
+    if resp.status_code != 200:
+        raise Exception(f"请求失败 (HTTP {resp.status_code}): {text_preview}")
+    if "json" not in content_type:
+        raise Exception(f"响应非 JSON (content-type: {content_type}): {text_preview}")
+    return resp.json()
+
+
+@app.route("/api/unpack-source/portraits", methods=["POST"])
+async def unpack_source_portraits() -> Response:
+    """
+    连接仓库并直接获取默认分支下的抽卡立绘文件列表。
+
+    不再分两步（获取版本→选版本→加载立绘），
+    改为直接访问默认分支上的 Luckdraw 目录。
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            logger.info("[unpack] 开始获取仓库信息…")
+            repo_data = await _github_api_get_json(client, "")
+            default_branch = repo_data.get("default_branch", "master")
+            logger.info(f"[unpack] 仓库默认分支: {default_branch}")
+
+            api_path = f"/contents/{_UNPACK_PORTRAIT_PATH}?ref={default_branch}"
+            logger.info(f"[unpack] 直接访问立绘目录: GET {api_path}")
+            items = await _github_api_get_json(client, api_path)
+            if not isinstance(items, list):
+                items = [items]
+            logger.info(f"[unpack] GitHub API 返回 {len(items)} 个条目")
+
+            image_ext = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
+            portraits = []
+            skipped_dirs = 0
+            skipped_ext = 0
+            skipped_pattern = 0
+
+            import re as _re
+            _luckdraw_pattern = _re.compile(r"^T_Luckdraw.+_UI\.png$")
+
+            for item in items:
+                if item.get("type") != "file":
+                    skipped_dirs += 1
+                    continue
+                ext = os.path.splitext(item["name"])[1].lower()
+                if ext not in image_ext:
+                    skipped_ext += 1
+                    continue
+                if not _luckdraw_pattern.match(item["name"]):
+                    skipped_pattern += 1
+                    continue
+                raw_url = (
+                    f"{_UNPACK_GH_PROXY}"
+                    f"https://raw.githubusercontent.com"
+                    f"/{_UNPACK_OWNER}/{_UNPACK_REPO}"
+                    f"/{default_branch}/{item['path']}"
+                )
+                logger.info(f"[unpack] 构造立绘URL(gh-proxy): {raw_url}")
+                portraits.append({
+                    "name": item["name"],
+                    "raw_url": raw_url,
+                    "size": item.get("size", 0),
+                })
+
+            logger.info(
+                f"[unpack] 过滤结果: {len(portraits)} 个立绘文件"
+                f" (跳过 {skipped_dirs} 个目录, {skipped_ext} 个非图片文件, {skipped_pattern} 个非Luckdraw立绘)"
+            )
+            return jsonify({"success": True, "portraits": portraits, "default_branch": default_branch})
+    except Exception as e:
+        logger.error(f"[unpack] 获取立绘列表失败: {e}")
+        return jsonify({"success": False, "message": str(e)})
+
+
+@app.route("/", methods=["GET"])
 async def index() -> Response:
     # 指向 static 目录
     static_dir = os.path.join(os.path.dirname(__file__), "static")
     return await send_from_directory(static_dir, "index.html")
 
 
-@app.route("/<path:filename>")
+@app.route("/<path:filename>", methods=["GET"])
 async def static_files(filename: str) -> Response:
+    logger.info(f"[static] GET /{filename}")
     # 指向 static 目录
     static_dir = os.path.join(os.path.dirname(__file__), "static")
     try:
@@ -623,11 +1031,36 @@ def _patch_signal_for_thread():
         signal.signal = original_signal
 
 
+# WebUI 关闭信号（由插件 terminate 调用）
+shutdown_event = threading.Event()
+# 记录运行中的事件循环，供主线程主动停止
+_running_loop: asyncio.AbstractEventLoop | None = None
+
+
+async def _start_checker():
+    """在 Quart 启动前注册：记录运行中的事件循环，供主线程主动停止。"""
+    global _running_loop
+    _running_loop = asyncio.get_running_loop()
+
+
+app.before_serving(_start_checker)
+
+
+def stop_server():
+    """设置关闭信号，并主动停止 server 的事件循环。"""
+    shutdown_event.set()
+    if _running_loop and _running_loop.is_running():
+        _running_loop.call_soon_threadsafe(_running_loop.stop)
+
+
 def run(host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
     """运行 Quart Web 服务器（同步入口，用于在线程中启动）。"""
     app.config["DEBUG"] = debug
+
     with _patch_signal_for_thread():
         asyncio.run(app.run_task(host=host, port=port, debug=debug))
+
+    _running_loop = None
 
 
 def parse_arguments():

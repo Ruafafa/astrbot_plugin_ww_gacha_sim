@@ -11,8 +11,9 @@ from typing import cast
 
 from PIL import Image
 
-from . import PLUGIN_PATH
 from .local_file_cache_manager import LocalFileCacheManager
+
+PLUGIN_PATH = Path(__file__).resolve().parent.parent.parent
 from .proxy_config import ProxyConfig
 from .resource_loader import ResourceLoader
 
@@ -276,32 +277,7 @@ class UIResourceManager:
             self.logger.info(f"缓存命中: {cache_key} -> {cached_file_path}")
             return Image.open(cached_file_path)
 
-        # 3. 检查本地路径 (portrait_path)
-        if item.portrait_path:
-            from pathlib import Path
-
-            path_obj = Path(item.portrait_path)
-
-            # 如果是相对路径，尝试在resource_dir下查找
-            if not path_obj.is_absolute():
-                path_obj = self.resource_dir / item.portrait_path
-
-            try:
-                if path_obj.exists():
-                    self.logger.info(f"本地资源存在: {path_obj}")
-                    # 将本地资源复制到缓存
-                    with open(path_obj, "rb") as f:
-                        local_content = f.read()
-                    cached_file_path = self.cache_manager.cache_file(
-                        local_content, cache_key
-                    )
-                    return Image.open(cached_file_path)
-                else:
-                    self.logger.info(f"本地资源不存在: {path_obj}")
-            except Exception as e:
-                self.logger.warning(f"检查本地资源时出错: {e}")
-
-        # 4. 检查网络URL (portrait_url)
+        # 3. 检查网络URL (portrait_url)
         if item.portrait_url:
             self.logger.info(f"尝试从网络下载: {item.portrait_url}")
             cached_path_str = self._download_from_url(item.portrait_url, cache_key)

@@ -3,8 +3,6 @@
 负责实现抽卡结果的可视化渲染
 """
 
-import os
-
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 from astrbot.api import logger
 
@@ -15,16 +13,27 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..gacha.cardpool_manager import CardPoolConfig
 
+# 系统中文字体候选列表（按平台优先级排列）
+_SYSTEM_FONT_CANDIDATES = [
+    "msyh.ttc",          # Windows: Microsoft YaHei
+    "msyhbd.ttc",        # Windows: Microsoft YaHei Bold
+    "simhei.ttf",        # Windows: SimHei
+    "PingFang.ttc",      # macOS: PingFang
+    "STHeiti.ttf",       # macOS: STHeiti
+    "NotoSansCJK-Regular.ttc",  # Linux: Noto Sans CJK
+    "wqy-microhei.ttc",  # Linux: WenQuanYi Micro Hei
+]
+
 # 布局常量配置
 class LayoutConfig:
     # 通用
     CARD_WIDTH = 430
     CARD_HEIGHT = 560
-    
+
     # 十连抽布局
     H_GAP = -50  # 水平间距
     V_GAP = 30   # 垂直间距
-    
+
     # 卡池详情布局
     DETAIL_WIDTH = 1000
     DETAIL_PADDING = 40
@@ -32,7 +41,7 @@ class LayoutConfig:
     DETAIL_TITLE_HEIGHT = 100
     DETAIL_HEADER_HEIGHT = 60
     DETAIL_ROW_HEIGHT = 40
-    
+
     # 颜色配置
     COLOR_BG = (30, 30, 30)
     COLOR_TEXT = (255, 255, 255)
@@ -44,44 +53,34 @@ class GachaRenderer:
 
     def __init__(self, ui_resource_manager: UIResourceManager = UIResourceManager()):
         self.ui_resource_manager = ui_resource_manager
-        # 确保字体目录存在
-        self.font_path = self._get_font_path()
         # 渲染参数 (从配置类加载)
         self.card_width = LayoutConfig.CARD_WIDTH
         self.card_height = LayoutConfig.CARD_HEIGHT
         self.h_gap = LayoutConfig.H_GAP
         self.v_gap = LayoutConfig.V_GAP
 
-    def _get_font_path(self) -> str | None:
-        """获取字体路径"""
-        # 优先使用插件内置字体: HYWenHei-85W.ttf
-        try:
-            # 使用更稳健的方式定位资源目录
-            # 假设结构是: src/render/gacha_renderer.py -> src/assets/font/HYWenHei-85W.ttf
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            src_dir = os.path.dirname(current_dir)
-            font_path = os.path.join(src_dir, "assets", "font", "HYWenHei-85W.ttf")
-            
-            if os.path.exists(font_path):
-                return font_path
-            else:
-                logger.warning(f"内置字体文件不存在: {font_path}")
-        except Exception as e:
-            logger.warning(f"计算字体路径出错: {e}")
-
-        # 如果找不到中文字体，返回None（后续会使用默认字体）
-        return None
+        # 性能缓存
+        self._font_cache: dict[int, Any] = {}
+        self._sprite_cache: dict[str, Image.Image] = {}
+        self._halftone_cache: Image.Image | None = None
+        self._cached_single_bg: Image.Image | None = None
+        self._cached_ten_bg: Image.Image | None = None
 
     def _get_font(self, size: int):
-        """获取字体对象"""
-        try:
-            if self.font_path:
-                return ImageFont.truetype(self.font_path, size)
-            else:
-                # 如果没有中文字体，使用默认字体
-                return ImageFont.load_default()
-        except:
-            return ImageFont.load_default()
+        """获取系统字体对象（带缓存），优先使用系统中文字体"""
+        if size in self._font_cache:
+            return self._font_cache[size]
+        font = None
+        for name in _SYSTEM_FONT_CANDIDATES:
+            try:
+                font = ImageFont.truetype(name, size)
+                break
+            except (OSError, IOError):
+                continue
+        if font is None:
+            font = ImageFont.load_default()
+        self._font_cache[size] = font
+        return font
 
     def render_pool_detail(self, config: "CardPoolConfig") -> Image.Image:
         """渲染卡池详细信息"""
@@ -283,29 +282,53 @@ class GachaRenderer:
             new_size = (int(iw * ratio), int(ih * ratio))
             return img.resize(new_size, Image.Resampling.LANCZOS)
 
-        # --- 图层 2: 背景层 (Background) ---
-        bg_sprite_name = f"bg_star_{rarity}.png"
-        bg_img = self.ui_resource_manager.get_sprite_from_atlas(
-            bg_sprite_name, remove_transparent_border=False
-        )
-        if bg_img:
-            # 背景通常铺满原始卡片区域
-            bg_layer = get_scaled_layer(bg_img, W, H, cover=True)
-            # 直接放置在画布上，不需要偏移
+        # --- 图层 2: 背景层 (Background，缓存缩放结果) ---
+        bg_cache_key = f"bg_{rarity}_{W}x{H}"
+        if bg_cache_key in self._sprite_cache:
+            bg_layer = self._sprite_cache[bg_cache_key]
+        else:
+            bg_sprite_name = f"bg_star_{rarity}.png"
+            bg_img = self.ui_resource_manager.get_sprite_from_atlas(
+                bg_sprite_name, remove_transparent_border=False
+            )
+            if bg_img:
+                bg_layer = get_scaled_layer(bg_img, W, H, cover=True)
+                self._sprite_cache[bg_cache_key] = bg_layer
+            else:
+                bg_layer = None
+
+        if bg_layer:
             card.paste(bg_layer, (0, 0), bg_layer)
         else:
             # 后备方案
             rarity_int = int(rarity.replace("star", "")) if rarity else 3
             bg_path = self.ui_resource_manager.get_background_for_quality(rarity_int)
-            bg_layer = Image.open(bg_path).convert("RGBA").resize((W, H))
-            # 直接放置在画布上，不需要偏移
-            card.paste(bg_layer, (0, 0))
+            alt_bg = Image.open(bg_path).convert("RGBA").resize((W, H))
+            card.paste(alt_bg, (0, 0))
 
         # --- 图层 3: 立绘层 (Portrait) ---
         try:
             # 直接从 UIResourceManager 获取立绘图像
             portrait_raw = self.ui_resource_manager.get_item_portrait(item)
             if portrait_raw:
+                portrait_raw = portrait_raw.convert("RGBA")
+                iw, ih = portrait_raw.size
+
+                # 裁剪到 404:560 宽高比（以图像中心为焦点）
+                crop_ar = 404 / 560
+                crop_w = iw
+                crop_h = int(iw / crop_ar)
+                if crop_h > ih:
+                    crop_h = ih
+                    crop_w = int(ih * crop_ar)
+                # 以图像中心裁剪
+                cx = iw // 2
+                cy = ih // 2
+                crop_box = (cx - crop_w // 2, cy - crop_h // 2,
+                            cx + crop_w // 2, cy + crop_h // 2)
+                if (crop_w < iw or crop_h < ih) and crop_w > 0 and crop_h > 0:
+                    portrait_raw = portrait_raw.crop(crop_box)
+
                 # 按比例计算立绘目标尺寸
                 p_target_w = W * LAYOUT["portrait"]["width_ratio"]
                 p_target_h = H  # 给立绘预留的最大高度比例
@@ -322,45 +345,49 @@ class GachaRenderer:
         except Exception as e:
             logger.warning(f"立绘加载失败: {e}")
 
-        # --- 图层 3.5: 半调图案层 (Halftone Pattern Layer) --- 信息层之上，图标层之下
+        # --- 图层 3.5: 半调图案层 (缓存缩放+透明度结果) ---
         try:
-            # 加载半调图案
-            bandiao_img = self.ui_resource_manager.get_halftone_pattern()
-            if bandiao_img:
-                # 调整半调图案大小以适应卡片
-                scaled_bandiao = bandiao_img.resize((W, H), Image.Resampling.LANCZOS)
+            if self._halftone_cache is None:
+                bandiao_img = self.ui_resource_manager.get_halftone_pattern()
+                if bandiao_img:
+                    scaled = bandiao_img.resize((W, H), Image.Resampling.LANCZOS)
+                    alpha = scaled.split()[3]
+                    alpha = alpha.point(lambda x: int(x * 0.618))
+                    scaled.putalpha(alpha)
+                    self._halftone_cache = scaled
 
-                # 设置透明度为61.8%
-                alpha = scaled_bandiao.split()[3]  # 获取alpha通道
-                alpha = alpha.point(lambda x: int(x * 0.618))  # 设置透明度为61.8%
-                scaled_bandiao.putalpha(alpha)  # 应用新的alpha通道
-
-                # 将半调图案向下移动，偏移量为卡片高度的10%
-                offset_y = int(H * 0.049)  # 向下移动卡片高度的10%
-                # 将半调图案绘制到卡片上，向下偏移一定距离
-                card.paste(scaled_bandiao, (0, offset_y), scaled_bandiao)
+            if self._halftone_cache:
+                offset_y = int(H * 0.049)
+                card.paste(self._halftone_cache, (0, offset_y), self._halftone_cache)
             else:
                 logger.warning("警告: 半调图案不存在，无法绘制半调图案")
         except Exception as e:
             logger.warning(f"半调图案加载失败: {e}")
 
-        # --- 图层 4: 信息展示层 (Info/Show Layer) ---
+        # --- 图层 4: 信息展示层 (Info/Show Layer，缓存缩放结果) ---
         show_sprite_name = f"show_star_{rarity}.png"
-        show_img = self.ui_resource_manager.get_sprite_from_atlas(
-            show_sprite_name, remove_transparent_border=False
-        )  # 不再移除透明边界以保持一致的定位基准
-        if show_img:
-            info_w = W * LAYOUT["info"]["width_ratio"] + 4
-            # 使用固定的高度比例来确保所有星级的信息展示层位置一致
-            target_info_height = 2 * H
-            info_layer = get_scaled_layer(show_img, info_w, int(target_info_height))
+        info_w = W * LAYOUT["info"]["width_ratio"] + 4
+        target_info_height = 2 * H
+        show_cache_key = f"show_{rarity}_{int(info_w)}x{int(target_info_height)}"
 
+        if show_cache_key in self._sprite_cache:
+            info_layer = self._sprite_cache[show_cache_key]
+        else:
+            show_img = self.ui_resource_manager.get_sprite_from_atlas(
+                show_sprite_name, remove_transparent_border=False
+            )
+            if show_img:
+                info_layer = get_scaled_layer(show_img, info_w, int(target_info_height))
+                self._sprite_cache[show_cache_key] = info_layer
+            else:
+                info_layer = None
+
+        if info_layer:
             ix = (W - info_layer.width) // 2
-            # 从底部开始计算信息层位置，使用配置中的bottom_offset_ratio
             element_bottom_y = H - int(
                 H * LAYOUT["info"]["bottom_offset_ratio"]
-            )  # 元素底部的Y坐标，基于配置的底部偏移比例
-            iy = element_bottom_y - info_layer.height  # 元素顶部的Y坐标
+            )
+            iy = element_bottom_y - info_layer.height
             card.paste(info_layer, (ix, iy), info_layer)
 
         # --- 图层 5: 图标层 (Icon Layer) --- 信息层上方，位于左侧开头
@@ -386,7 +413,7 @@ class GachaRenderer:
                 # 调整图标亮度，将亮度调暗
 
                 enhancer = ImageEnhance.Brightness(scaled_icon)
-                dimmed_icon = enhancer.enhance(0.9)  # 将亮度调整为原始的70%
+                dimmed_icon = enhancer.enhance(0.9)  # 将亮度调整为原始的90%
 
                 # 计算位置:
                 icon_x = int(W * LAYOUT["icon"]["left_offset_ratio"])
@@ -402,127 +429,121 @@ class GachaRenderer:
         # 移除文字渲染层
         return card
 
+    def _draw_alpha_text(
+        self, image: Image.Image, pos: tuple[int, int], text: str,
+        font: Any, fill: tuple[int, int, int, int],
+    ):
+        """绘制带透明度的文字（Pillow 的 draw.text 不支持 RGBA fill）"""
+        color = fill[:3]
+        alpha = fill[3] if len(fill) == 4 else 255
+
+        if alpha >= 255:
+            draw = ImageDraw.Draw(image)
+            draw.text(pos, text, font=font, fill=color)
+            return
+
+        text_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        txt_draw = ImageDraw.Draw(text_layer)
+        txt_draw.text(pos, text, font=font, fill=(*color, 255))
+        r, g, b, a = text_layer.split()
+        a = a.point(lambda x: int(x * alpha / 255))
+        text_layer = Image.merge("RGBA", (r, g, b, a))
+        image.paste(text_layer, (0, 0), text_layer)
+
     def render_single_pull(self, item: Item, nickname: str = "", user_id: str = "") -> Image.Image:
         """渲染单次抽卡结果"""
         card = self._create_single_card(item)
 
-        # --- 使用T_LuckdrawBg.png作为单抽背景，进行精确裁剪优化 ---
+        # --- 使用T_LuckdrawBg.png作为单抽背景（缓存裁剪结果） ---
         bg_path_str = self.ui_resource_manager.get_background_path()
         final_image = None
-        
+
         if bg_path_str:
             try:
-                # 加载背景图片
-                bg_image = Image.open(bg_path_str).convert("RGBA")
-                bg_width, bg_height = bg_image.size
+                if self._cached_single_bg is None:
+                    bg_image = Image.open(bg_path_str).convert("RGBA")
+                    crop_width, crop_height = 1000, 800
+                    crop_left = (bg_image.width - crop_width) // 2
+                    crop_top = (bg_image.height - crop_height) // 2
+                    self._cached_single_bg = bg_image.crop(
+                        (crop_left, crop_top, crop_left + crop_width, crop_top + crop_height)
+                    )
 
-                # --- 精确裁剪背景 ---
-                # 计算裁剪区域：从背景中心截取1000x800的区域，比例协调且视觉效果好
-                crop_width = 1000
-                crop_height = 800
-
-                # 计算裁剪起始坐标（从中心开始裁剪）
-                crop_left = (bg_width - crop_width) // 2
-                crop_top = (bg_height - crop_height) // 2
-                crop_right = crop_left + crop_width
-                crop_bottom = crop_top + crop_height
-
-                # 执行裁剪
-                cropped_bg = bg_image.crop((crop_left, crop_top, crop_right, crop_bottom))
-
-                # 创建最终图像，使用裁剪后的背景作为基础
-                final_image = cropped_bg.copy()
-
-                # 确保final_image是RGBA模式
+                final_image = self._cached_single_bg.copy()
                 if final_image.mode != "RGBA":
                     final_image = final_image.convert("RGBA")
-
-                # 计算卡片位置，使其在裁剪后的背景上居中
-                card_x = (crop_width - card.width) // 2
-                card_y = (crop_height - card.height) // 2
-
-                # 将卡片粘贴到裁剪后的背景上
+                card_x = (1000 - card.width) // 2
+                card_y = (800 - card.height) // 2
                 final_image.paste(card, (card_x, card_y), card)
             except Exception as e:
                 logger.warning(f"背景处理失败: {e}")
                 final_image = card
         else:
-            # 如果背景图片不存在，使用原来的单卡片渲染
             final_image = card
 
-        # --- 添加文字信息 (移到最后统一绘制，确保在背景之上) ---
-        draw = ImageDraw.Draw(final_image)
+        # --- 添加文字信息（使用 _draw_alpha_text 修复透明度） ---
         image_width, image_height = final_image.size
-        
+
         # 1. 警告文字 (左下角)
         warning_text = "模拟抽卡仅供娱乐，素材版权属于库洛"
-        # 单个卡片使用较小的字体
         font = self._get_font(12)
-        
-        bbox = draw.textbbox((0, 0), warning_text, font=font)
-        text_w = bbox[2] - bbox[0]
+        bbox = font.getbbox(warning_text) or (0, 0, 0, 0)
         text_h = bbox[3] - bbox[1]
-        
-        text_x = 10
-        text_y = image_height - text_h - 10
-        draw.text((text_x, text_y), warning_text, font=font, fill=(255, 255, 255, 200))
+        self._draw_alpha_text(
+            final_image, (10, image_height - text_h - 10), warning_text,
+            font=font, fill=(255, 255, 255, 200),
+        )
 
         # 2. 用户昵称和ID (右下角)
         if nickname or user_id:
             right_margin = 15
             bottom_margin = 15
-            
-            # 调整字号为 24，移除描边，透明度 80% (204)
             text_font = self._get_font(24)
-            text_color = (255, 255, 255, 204)
-            
-            # 用户ID
+
             if user_id:
                 id_text = f"特征码: {user_id}"
-                id_bbox = draw.textbbox((0, 0), id_text, font=text_font)
+                id_bbox = text_font.getbbox(id_text) or (0, 0, 0, 0)
                 id_w = id_bbox[2] - id_bbox[0]
                 id_h = id_bbox[3] - id_bbox[1]
-                
+
                 id_x = image_width - id_w - right_margin
                 id_y = image_height - id_h - bottom_margin
-                draw.text((id_x, id_y), id_text, font=text_font, fill=text_color)
-                
-                # 更新底部边距给昵称使用
+                self._draw_alpha_text(
+                    final_image, (id_x, id_y), id_text,
+                    font=text_font, fill=(255, 255, 255, 204),
+                )
                 bottom_margin += id_h + 5
-            
-            # 昵称
+
             if nickname:
-                name_bbox = draw.textbbox((0, 0), nickname, font=text_font)
+                name_bbox = text_font.getbbox(nickname) or (0, 0, 0, 0)
                 name_w = name_bbox[2] - name_bbox[0]
                 name_h = name_bbox[3] - name_bbox[1]
-                
+
                 name_x = image_width - name_w - right_margin
                 name_y = image_height - name_h - bottom_margin
-                draw.text((name_x, name_y), nickname, font=text_font, fill=text_color)
+                self._draw_alpha_text(
+                    final_image, (name_x, name_y), nickname,
+                    font=text_font, fill=(255, 255, 255, 204),
+                )
 
         return final_image
 
     def render_ten_pulls(self, results: list[Item], nickname: str = "", user_id: str = "") -> Image.Image:
         """渲染十连抽卡结果"""
-        # 计算布局
         cards_per_row = 5
         rows = (len(results) + cards_per_row - 1) // cards_per_row
 
-        # 计算整体图像大小
         total_width = cards_per_row * self.card_width + (cards_per_row + 1) * self.h_gap
         total_height = rows * self.card_height + (rows + 1) * self.v_gap
 
-        # 尝试加载背景图片
         bg_path_str = self.ui_resource_manager.get_background_path()
         if bg_path_str:
-            # 加载背景图片
-            bg_image = Image.open(bg_path_str).convert("RGBA")
+            # 缓存背景图加载
+            if self._cached_ten_bg is None:
+                self._cached_ten_bg = Image.open(bg_path_str).convert("RGBA")
+            bg_image = self._cached_ten_bg
             bg_width, bg_height = bg_image.size
 
-            # 使用背景图片作为基础图像，保持原始尺寸
-            full_image = bg_image.copy()
-
-            # 计算卡片布局的起始位置，使其在背景上居中
             cards_total_width = (
                 cards_per_row * self.card_width + (cards_per_row - 1) * self.h_gap
             )
@@ -530,84 +551,80 @@ class GachaRenderer:
 
             start_x = (bg_width - cards_total_width) // 2
             start_y = (bg_height - cards_total_height) // 2
+
+            # 裁剪背景到包含卡片的合适区域，减少输出图片体积
+            padding = 80
+            crop_x1 = max(0, start_x - padding)
+            crop_y1 = max(0, start_y - padding)
+            crop_x2 = min(bg_width, start_x + cards_total_width + padding)
+            crop_y2 = min(bg_height, start_y + cards_total_height + padding)
+            cropped_bg = bg_image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+            full_image = cropped_bg.copy()
+
+            # 调整卡片起始位置到裁剪后的坐标
+            start_x -= crop_x1
+            start_y -= crop_y1
         else:
-            # 如果背景图片不存在，使用原来的深灰色背景
             full_image = Image.new(
                 "RGBA", (total_width, total_height), (50, 50, 50, 255)
             )
             start_x = self.h_gap
             start_y = self.v_gap
 
-        # 确保full_image是RGBA模式以正确处理透明度
         if full_image.mode != "RGBA":
             full_image = full_image.convert("RGBA")
 
         # 渲染每张卡片
         for idx, item in enumerate(results):
             card = self._create_single_card(item)
-
-            # 计算位置
             row = idx // cards_per_row
             col = idx % cards_per_row
-
             x = start_x + col * (self.card_width + self.h_gap)
             y = start_y + row * (self.card_height + self.v_gap)
 
-            # 使用透明度混合粘贴卡片，确保透明通道信息完整保留
             if card.mode == "RGBA":
                 full_image.paste(card, (x, y), card)
             else:
                 full_image.paste(card, (x, y))
 
-        # --- 添加警告文字 --- 模拟抽卡仅供娱乐，素材版权属于库洛
-        draw = ImageDraw.Draw(full_image)
-        warning_text = "模拟抽卡仅供娱乐，素材版权属于库洛"
-
-        # 获取字体，使用合适的大小
-        font = self._get_font(24)
-
-        # 计算文字大小
-        bbox = draw.textbbox((0, 0), warning_text, font=font)
-        text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
+        # --- 添加文字信息（使用 _draw_alpha_text 修复透明度） ---
         image_width, image_height = full_image.size
-        
-        # 警告文字移动到左下角
-        text_x = 50
-        text_y = image_height - text_height - 50
-        draw.text((text_x, text_y), warning_text, font=font, fill=(255, 255, 255, 200))
 
-        # --- 添加用户昵称和ID ---
+        warning_text = "模拟抽卡仅供娱乐，素材版权属于库洛"
+        font = self._get_font(24)
+        bbox = font.getbbox(warning_text) or (0, 0, 0, 0)
+        th = bbox[3] - bbox[1]
+        self._draw_alpha_text(
+            full_image, (50, image_height - th - 50), warning_text,
+            font=font, fill=(255, 255, 255, 200),
+        )
+
         if nickname or user_id:
-            # 右下角绘制
             right_margin = 50
             bottom_margin = 50
-            
-            # 用户ID
+            id_font = self._get_font(36)
+
             if user_id:
-                id_font = self._get_font(36)
                 id_text = f"特征码: {user_id}"
-                id_bbox = draw.textbbox((0, 0), id_text, font=id_font)
+                id_bbox = id_font.getbbox(id_text) or (0, 0, 0, 0)
                 id_w = id_bbox[2] - id_bbox[0]
                 id_h = id_bbox[3] - id_bbox[1]
-                
-                id_x = image_width - id_w - right_margin
-                id_y = image_height - id_h - bottom_margin + 5
-                draw.text((id_x, id_y), id_text, font=id_font, fill=(255, 255, 255, 255))
-                
-                # 更新底部边距给昵称使用
+                self._draw_alpha_text(
+                    full_image,
+                    (image_width - id_w - right_margin, image_height - id_h - bottom_margin + 5),
+                    id_text, font=id_font, fill=(255, 255, 255, 255),
+                )
                 bottom_margin += id_h + 10
-            
-            # 昵称
+
             if nickname:
-                name_font = self._get_font(36)
-                name_bbox = draw.textbbox((0, 0), nickname, font=name_font)
+                name_bbox = id_font.getbbox(nickname) or (0, 0, 0, 0)
                 name_w = name_bbox[2] - name_bbox[0]
                 name_h = name_bbox[3] - name_bbox[1]
-                
-                name_x = image_width - name_w - right_margin
-                name_y = image_height - name_h - bottom_margin
-                draw.text((name_x, name_y), nickname, font=name_font, fill=(255, 255, 255, 255))
+                self._draw_alpha_text(
+                    full_image,
+                    (image_width - name_w - right_margin, image_height - name_h - bottom_margin),
+                    nickname, font=id_font, fill=(255, 255, 255, 255),
+                )
 
         return full_image
 
@@ -629,9 +646,11 @@ class GachaRenderer:
             total_records: 总记录数
             pool_name: 卡池名称
         """
-        # 1. 设置画布参数
+        # 1. 设置画布参数（根据记录数动态计算高度）
         width = 1200
-        height = 800  # 基础高度，根据内容调整
+        base_height = 300
+        records_area = len(records) * 45
+        height = max(800, base_height + records_area)
 
         # 颜色定义
         bg_color = (240, 240, 240, 255)  # 浅灰背景

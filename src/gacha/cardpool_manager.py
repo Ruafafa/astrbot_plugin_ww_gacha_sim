@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import shutil
+import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -132,6 +133,7 @@ class CardPoolManager:
             self.config_dir = config_dir_path
         self._configs: dict[str, CardPoolConfig] = {}  # 内存中的配置数据，键为 cp_id
         self._file_path_to_cp_id: dict[str, str] = {}  # 文件路径到 cp_id 的映射
+        self._lock = threading.Lock()  # 保护 _configs 和 _file_path_to_cp_id 的线程安全
         # 确保配置目录存在
         self._ensure_dir_exists()
         # 初始化默认配置
@@ -144,15 +146,15 @@ class CardPoolManager:
         try:
             # 检查配置目录下是否有json文件
             has_json = next(self.config_dir.glob("*.json"), None) is not None
-            
+
             if has_json:
                 return
 
             logger.info("检测到配置目录为空，正在初始化默认卡池配置...")
-            
+
             # 预置配置目录
             presets_dir = Path(__file__).parent.parent / "assets" / "presets"
-            
+
             if not presets_dir.exists():
                 logger.warning(f"预置配置目录不存在: {presets_dir}")
                 return
@@ -162,9 +164,37 @@ class CardPoolManager:
                 if item.is_file() and item.suffix == ".json":
                     shutil.copy2(item, self.config_dir / item.name)
                     logger.info(f"已复制预置配置: {item.name}")
-                    
+
         except Exception as e:
             logger.error(f"初始化默认配置失败: {e}")
+
+    def sync_new_presets(self) -> int:
+        """同步新增的预置配置到配置目录。
+
+        仅复制 presets 中有而配置目录中没有的 .json 文件，
+        不会覆盖用户已有的配置。
+
+        Returns:
+            int: 本次同步新增的配置数量
+        """
+        presets_dir = Path(__file__).parent.parent / "assets" / "presets"
+        if not presets_dir.exists():
+            return 0
+
+        added = 0
+        existing_names = {p.name for p in self.config_dir.iterdir() if p.suffix == ".json"}
+
+        for item in presets_dir.iterdir():
+            if item.is_file() and item.suffix == ".json" and item.name not in existing_names:
+                shutil.copy2(item, self.config_dir / item.name)
+                logger.info(f"已同步新预置配置: {item.name}")
+                added += 1
+
+        if added > 0:
+            logger.info(f"预置配置同步完成，新增 {added} 个配置")
+            # 重新加载配置到内存
+            self.load_all_configs()
+        return added
 
     def find_config_by_identifier(self, identifier: str) -> CardPoolConfig | None:
         """
@@ -228,70 +258,80 @@ class CardPoolManager:
             加载的配置字典，键为 cp_id，值为配置数据类实例
         """
         try:
-            self._configs.clear()
-            self._file_path_to_cp_id.clear()
+            with self._lock:
+                self._configs.clear()
+                self._file_path_to_cp_id.clear()
 
-            # 深度扫描配置目录及其子目录
-            for root, dirs, files in os.walk(self.config_dir):
-                for filename in files:
-                    if filename.endswith(".json"):
-                        # 跳过文件名为 .json 的配置文件（即 .json 后缀前是空白字符）
-                        if filename == ".json":
-                            logger.debug("跳过文件名为 .json 的配置文件")
-                            continue
+                # 深度扫描配置目录及其子目录
+                for root, dirs, files in os.walk(self.config_dir):
+                    for filename in files:
+                        if filename.endswith(".json"):
+                            # 跳过文件名为 .json 的配置文件（即 .json 后缀前是空白字符）
+                            if filename == ".json":
+                                logger.debug("跳过文件名为 .json 的配置文件")
+                                continue
 
-                        # 计算相对于配置目录的路径
-                        full_path = os.path.join(root, filename)
-                        rel_path = os.path.relpath(full_path, self.config_dir)
-                        file_path = rel_path[
-                            :-5
-                        ]  # 移除.json后缀，将路径分隔符统一为正斜杠
-                        file_path = file_path.replace("\\", "/")
+                            # 计算相对于配置目录的路径
+                            full_path = os.path.join(root, filename)
+                            rel_path = os.path.relpath(full_path, self.config_dir)
+                            file_path = rel_path[
+                                :-5
+                            ]  # 移除.json后缀，将路径分隔符统一为正斜杠
+                            file_path = file_path.replace("\\", "/")
 
-                        try:
-                            with open(full_path, encoding="utf-8") as f:
-                                config_data = json.load(f)
+                            try:
+                                with open(full_path, encoding="utf-8") as f:
+                                    config_data = json.load(f)
 
-                                # 跳过没有名称的卡池配置
-                                if (
-                                    "name" not in config_data
-                                    or not config_data["name"]
-                                    or not config_data["name"].strip()
-                                ):
-                                    logger.warning(
-                                        f"跳过没有名称的配置文件: {file_path}"
+                                    # 跳过没有名称的卡池配置
+                                    if (
+                                        "name" not in config_data
+                                        or not config_data["name"]
+                                        or not config_data["name"].strip()
+                                    ):
+                                        logger.warning(
+                                            f"跳过没有名称的配置文件: {file_path}"
+                                        )
+                                        continue
+
+                                    # 确保cp_id存在，根据相对路径+卡池名称生成唯一ID
+                                    if "cp_id" not in config_data:
+                                        config_data["cp_id"] = self._generate_cp_id(
+                                            file_path, config_data["name"]
+                                        )
+                                    # 转换为数据类实例
+                                    config_instance = CardPoolConfig.from_dict(config_data)
+                                    self._configs[config_instance.cp_id] = config_instance
+                                    self._file_path_to_cp_id[file_path] = (
+                                        config_instance.cp_id
                                     )
-                                    continue
-
-                                # 确保cp_id存在，根据相对路径+卡池名称生成唯一ID
-                                if "cp_id" not in config_data:
-                                    config_data["cp_id"] = self._generate_cp_id(
-                                        file_path, config_data["name"]
+                                    logger.info(
+                                        f"已加载配置文件: {file_path}, cp_id: {config_instance.cp_id}"
                                     )
-                                # 转换为数据类实例
-                                config_instance = CardPoolConfig.from_dict(config_data)
-                                self._configs[config_instance.cp_id] = config_instance
-                                self._file_path_to_cp_id[file_path] = (
-                                    config_instance.cp_id
-                                )
-                                logger.info(
-                                    f"已加载配置文件: {file_path}, cp_id: {config_instance.cp_id}"
-                                )
-                        except json.JSONDecodeError as e:
-                            logger.error(f"JSON格式错误: {file_path} - {e}")
-                            raise ValueError(f"配置文件 {file_path} 格式错误: {e}")
-                        except OSError as e:
-                            logger.error(f"读取文件失败: {file_path} - {e}")
-                            raise OSError(f"读取配置文件 {file_path} 失败: {e}")
-                        except Exception as e:
-                            logger.error(f"处理配置文件 {file_path} 失败: {e}")
-                            raise RuntimeError(f"处理配置文件 {file_path} 失败: {e}")
+                            except json.JSONDecodeError as e:
+                                logger.error(f"JSON格式错误: {file_path} - {e}")
+                                raise ValueError(f"配置文件 {file_path} 格式错误: {e}")
+                            except OSError as e:
+                                logger.error(f"读取文件失败: {file_path} - {e}")
+                                raise OSError(f"读取配置文件 {file_path} 失败: {e}")
+                            except Exception as e:
+                                logger.error(f"处理配置文件 {file_path} 失败: {e}")
+                                raise RuntimeError(f"处理配置文件 {file_path} 失败: {e}")
 
             logger.info(f"共加载 {len(self._configs)} 个配置文件")
             return self._configs.copy()
         except Exception as e:
             logger.error(f"加载配置文件失败: {e}")
             raise RuntimeError(f"加载配置文件失败: {e}")
+
+    def reload_all(self) -> dict[str, CardPoolConfig]:
+        """重新扫描配置目录并重新加载所有配置
+
+        返回:
+            加载的配置字典，键为 cp_id，值为配置数据类实例
+        """
+        logger.info("正在重新加载所有卡池配置...")
+        return self.load_all_configs()
 
     def get_config_ids(self) -> list[str]:
         """获取所有配置的 cp_id 列表
@@ -403,9 +443,10 @@ class CardPoolManager:
             # 保存到文件
             self._save_config(full_file_path, config_instance)
 
-            # 添加到内存
-            self._configs[config_instance.cp_id] = config_instance
-            self._file_path_to_cp_id[full_file_path] = config_instance.cp_id
+            # 写入内存（线程安全）
+            with self._lock:
+                self._configs[config_instance.cp_id] = config_instance
+                self._file_path_to_cp_id[full_file_path] = config_instance.cp_id
 
             logger.info(f"已添加配置: {full_file_path}, cp_id: {config_instance.cp_id}")
             return config_instance
@@ -476,15 +517,17 @@ class CardPoolManager:
                 if os.path.exists(old_full_path):
                     os.remove(old_full_path)
 
-                # 更新内存映射
-                del self._file_path_to_cp_id[actual_file_path]
-                self._file_path_to_cp_id[new_file_path] = cp_id
+                # 更新内存映射（线程安全）
+                with self._lock:
+                    del self._file_path_to_cp_id[actual_file_path]
+                    self._file_path_to_cp_id[new_file_path] = cp_id
 
             # 保存到文件
             self._save_config(new_file_path, config_instance)
 
-            # 更新内存中的配置
-            self._configs[config_instance.cp_id] = config_instance
+            # 更新内存中的配置（线程安全）
+            with self._lock:
+                self._configs[config_instance.cp_id] = config_instance
 
             logger.info(f"已更新配置: {new_file_path}, cp_id: {config_instance.cp_id}")
             return config_instance
@@ -567,8 +610,9 @@ class CardPoolManager:
             # 保存到文件
             self._save_config(actual_file_path, updated_instance)
 
-            # 更新内存中的配置
-            self._configs[updated_instance.cp_id] = updated_instance
+            # 更新内存中的配置（线程安全）
+            with self._lock:
+                self._configs[updated_instance.cp_id] = updated_instance
 
             logger.info(f"已修改配置属性: {actual_file_path}.{property_path}")
             return updated_instance
@@ -623,9 +667,10 @@ class CardPoolManager:
             else:
                 logger.warning(f"配置文件不存在: {actual_file_path}.json")
 
-            # 从内存中删除
-            del self._configs[cp_id]
-            del self._file_path_to_cp_id[actual_file_path]
+            # 从内存中删除（线程安全）
+            with self._lock:
+                del self._configs[cp_id]
+                del self._file_path_to_cp_id[actual_file_path]
             logger.info(f"已删除配置: {actual_file_path}, cp_id: {cp_id}")
             return True
         except Exception as e:
@@ -711,7 +756,8 @@ class CardPoolManager:
             with open(full_path, encoding="utf-8") as f:
                 config_data = json.load(f)
                 config_instance = CardPoolConfig.from_dict(config_data)
-                self._configs[config_instance.cp_id] = config_instance
+                with self._lock:
+                    self._configs[config_instance.cp_id] = config_instance
                 logger.info(
                     f"已重新加载配置: {file_path}, cp_id: {config_instance.cp_id}"
                 )
@@ -776,8 +822,9 @@ class CardPoolManager:
             # 保存到文件
             self._save_config(actual_file_path, updated_instance)
 
-            # 更新内存中的配置
-            self._configs[updated_instance.cp_id] = updated_instance
+            # 更新内存中的配置（线程安全）
+            with self._lock:
+                self._configs[updated_instance.cp_id] = updated_instance
 
             logger.info(
                 f"已{'启用' if enable else '禁用'}配置: {actual_file_path}, cp_id: {updated_instance.cp_id}"

@@ -18,7 +18,6 @@ class Item:
         rarity: str,
         item_type: str,
         affiliated_type: str,
-        portrait_path: str,
         portrait_url: str = "",
         external_id: str | None = None,
     ):
@@ -30,7 +29,6 @@ class Item:
             rarity: 物品稀有度 ('5star', '4star', '3star')
             item_type: 物品类型 (character, weapon)
             affiliated_type: 关联类型 (character, weapon)
-            portrait_path: 物品立绘路径
             portrait_url: 物品立绘URL
             external_id: 物品外部ID，用于稳定标识物品
         """
@@ -41,17 +39,15 @@ class Item:
         self.rarity = rarity
         self.type = item_type
         self.affiliated_type = affiliated_type
-        self.portrait_path = portrait_path
         self.portrait_url = portrait_url
 
     @staticmethod
-    @lru_cache(maxsize=128)  # 限制缓存大小为128个物品，可根据需要调整
+    @lru_cache(maxsize=128)
     def create_item(
         name: str,
         rarity: str,
         item_type: str,
         affiliated_type: str,
-        portrait_path: str,
         portrait_url: str = "",
         external_id: str | None = None,
     ):
@@ -63,7 +59,6 @@ class Item:
             rarity: 物品稀有度 ('5star', '4star', '3star')
             item_type: 物品类型 (character, weapon)
             affiliated_type: 关联类型 (character, weapon)
-            portrait_path: 物品立绘路径
             portrait_url: 物品立绘URL
             external_id: 物品外部ID，用于稳定标识物品
         """
@@ -72,7 +67,6 @@ class Item:
             rarity,
             item_type,
             affiliated_type,
-            portrait_path,
             portrait_url,
             external_id,
         )
@@ -86,7 +80,6 @@ class Item:
             "rarity": self.rarity,
             "type": self.type,
             "affiliated_type": self.affiliated_type,
-            "portrait_path": self.portrait_path,
             "portrait_url": self.portrait_url,
         }
 
@@ -113,7 +106,6 @@ class Item:
             "rarity",
             "type",
             "affiliated_type",
-            "portrait_path",
         }
         if not required_fields.issubset(data.keys()):
             raise ValueError(
@@ -134,7 +126,6 @@ class Item:
             rarity=rarity_value,
             item_type=data["type"],
             affiliated_type=data["affiliated_type"],
-            portrait_path=data["portrait_path"],
             portrait_url=data.get("portrait_url", ""),
             external_id=data["external_id"],
         )
@@ -203,7 +194,6 @@ class ItemManager:
                     rarity=details["rarity"],
                     item_type=details["type"],
                     affiliated_type=details["affiliated_type"],
-                    portrait_path=details["portrait_path"],
                     portrait_url=details.get("portrait_url", ""),
                     external_id=details["external_id"],
                 )

@@ -180,7 +180,10 @@ class GachaMechanics:
         prob_settings = pool_config.probability_settings
         up_5star_rate = prob_settings.get("up_5star_rate", 0.5)
         up_4star_rate = prob_settings.get("up_4star_rate", 0.5)
-        _4star_role_rate = prob_settings.get("_4star_role_rate", 0.06)
+        _4star_weapon_rate = prob_settings.get(
+            "_4star_weapon_rate",
+            prob_settings.get("_4star_role_rate", 0.06),  # 兼容旧配置键名
+        )
         _4star_hard_pity_pull = pool_config.probability_progression["4star"].get(
             "hard_pity_pull", 10
         )
@@ -214,30 +217,21 @@ class GachaMechanics:
                 if config_item_id in all_items:
                     items[config_item_id] = all_items[config_item_id]
 
-        # 按稀有度分组物品
-        items_by_rarity = {
-            "5star": [item for item in items.values() if item.rarity == "5star"],
-            "4star": [item for item in items.values() if item.rarity == "4star"],
-            "3star": [item for item in items.values() if item.rarity == "3star"],
-        }
+        # 按稀有度动态分组物品
+        items_by_rarity: dict[str, list[Item]] = {}
+        for item in items.values():
+            items_by_rarity.setdefault(item.rarity, []).append(item)
 
-        # 按稀有度和UP状态分组物品
-        up_items_by_rarity = {
-            "5star": [
-                item
-                for item in items_by_rarity["5star"]
-                if getattr(item, "external_id", None) in rate_up_5star_ids
-            ],
-            "4star": [
-                item
-                for item in items_by_rarity["4star"]
-                if getattr(item, "external_id", None) in rate_up_4star_ids
-            ],
-        }
+        # 按稀有度和UP状态动态分组物品
+        up_items_by_rarity: dict[str, list[Item]] = {}
+        for item in items.values():
+            up_ids = pool_config.rate_up_item_ids.get(item.rarity, [])
+            if getattr(item, "external_id", None) in up_ids:
+                up_items_by_rarity.setdefault(item.rarity, []).append(item)
 
         # >核心抽卡逻辑<
         # 1.检查是否抽到五星物品
-        if self.calculate_rate_5star(pity_5star + 1, pool_config) > local_random:
+        if self.calculate_rate_5star(pity_5star, pool_config) > local_random:
             # 抽到五星，重置五星保底计数
             new_pity_5star = 0
 
@@ -264,17 +258,17 @@ class GachaMechanics:
                 _5star_guaranteed = True
 
         # 2.检查是否抽到四星物品
-        elif self.calculate_rate_4star(pity_4star + 1, pool_config) > local_random:
+        elif self.calculate_rate_4star(pity_4star, pool_config) > local_random:
             # 抽到四星物品，重置四星保底计数
             new_pity_4star = 0
             # 五星保底计数+1
             new_pity_5star += 1
 
-            # 检测是否抽到了四星角色
-            item_type = "character" if random.random() > _4star_role_rate else "weapon"
+            # 检测是否抽到了四星武器
+            item_type = "character" if random.random() > _4star_weapon_rate else "weapon"
 
             # 尝试获取四星物品
-            is_up = rate_up_4star_ids and random.random() < up_4star_rate
+            is_up = (not _4star_guaranteed and rate_up_4star_ids and random.random() < up_4star_rate)
             local_item = self._get_item_with_fallback(
                 base_rarity="4star",
                 is_up=is_up,

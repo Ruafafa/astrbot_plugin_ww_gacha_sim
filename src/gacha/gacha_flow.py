@@ -92,10 +92,6 @@ class GachaFlow:
         Returns:
             Optional[Item]: 抽取到的物品对象，可能为None
         """
-        # 根据卡池配置的 config_group 切换物品管理器的表
-        if hasattr(pool_config, "config_group"):
-            self.item_data_manager.set_config_group(pool_config.config_group)
-
         # 执行抽卡核心逻辑，获取物品和更新后的状态
         (
             item,
@@ -130,6 +126,10 @@ class GachaFlow:
         Returns:
             Dict[str, Any]: 包含抽卡结果的字典
         """
+        # 根据卡池配置的 config_group 切换物品管理器的表
+        if hasattr(pool_config, "config_group"):
+            self.item_data_manager.set_config_group(pool_config.config_group)
+
         # 执行抽卡逻辑
         try:
             item_obj = self.pull(pool_config)
@@ -236,15 +236,12 @@ class GachaFlow:
                         )
                     else:
                         logger.warning(f"抽卡返回无效物品: {item}，将重试")
-                except ValueError as e:
+                except Exception as e:
                     # 单次抽卡失败（如物品列表为空），重试该次抽卡
                     logger.warning(f"十连抽卡中某次抽卡失败: {e}，将重试")
                     continue
-        except ValueError as e:
-            logger.error(f"十连抽卡时发生值错误: {e}")
-            raise
         except Exception as e:
-            logger.error(f"十连抽卡时发生未知错误: {e}")
+            logger.error(f"十连抽卡时发生错误: {e}")
             raise
 
         # 一次性保存用户状态和抽卡历史到数据库

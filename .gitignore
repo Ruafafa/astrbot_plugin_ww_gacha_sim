@@ -9,6 +9,7 @@
 # Whitelist files in root
 !_conf_schema.json
 !.gitignore
+!CHANGELOG.md
 !logo.png
 !main.py
 !metadata.yaml

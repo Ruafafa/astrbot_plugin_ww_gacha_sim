@@ -70,21 +70,7 @@ class ResourceLoader:
                             proxy_url = next(iter(proxy.values()))
 
                     if proxy_url:
-                        # 检查是否为 GitHub 加速代理（如 gh-proxy.com）
-                        # 如果是加速代理且目标是 GitHub 资源，则使用 URL 前缀拼接方式，而不是标准代理协议
-                        is_gh_accelerator = any(domain in proxy_url for domain in ["gh-proxy.com", "ghproxy", "fastgit"])
-                        is_github_resource = any(domain in url for domain in ["github.com", "githubusercontent.com"])
-                        
-                        if is_gh_accelerator and is_github_resource:
-                            # 移除末尾的斜杠以避免双重斜杠
-                            prefix = proxy_url.rstrip("/")
-                            url = f"{prefix}/{url}"
-                            logger.info(f"使用 GitHub 加速代理: {url}")
-                            # 清空 client_kwargs 中的 proxy，因为我们已经重写了 URL
-                            if "proxy" in client_kwargs:
-                                del client_kwargs["proxy"]
-                        else:
-                            client_kwargs["proxy"] = proxy_url
+                        client_kwargs["proxy"] = proxy_url
 
                 with httpx.Client(**client_kwargs) as client:
                     response = client.get(url, headers=self.headers)

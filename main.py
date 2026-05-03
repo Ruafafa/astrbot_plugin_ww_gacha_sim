@@ -1,49 +1,48 @@
+import asyncio
+import hashlib
+import io
+import threading
 import time
 from pathlib import Path
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.star import Context, Star, register, StarTools
+from astrbot.api.star import Context, Star, StarTools
+from astrbot.core.message.components import Image
 
 from .src.db.database import CommonDatabase
 from .src.db.gacha_db_operations import GachaDBOperations
 from .src.db.item_db_operations import ItemDBOperations
-from .src.gacha.cardpool_manager import CardPoolManager
+from .src.gacha.cardpool_manager import CardPoolConfig, CardPoolManager
 from .src.gacha.gacha_flow import GachaFlow
 from .src.gacha.gacha_mechanics import GachaMechanics
 from .src.item_data.item_manager import ItemManager
+from .src.db.migration import run_migrations
 from .src.render.gacha_renderer import GachaRenderer
 from .src.render.local_file_cache_manager import LocalFileCacheManager
 from .src.render.proxy_config import ProxyConfig
 from .src.render.resource_loader import ResourceLoader
 from .src.render.ui_resources_manager import UIResourceManager
+from .src.web.server import stop_server, run as run_webui
+
 
 class WutheringWavesGachaPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
-        """
-        插件初始化方法
-        """
         super().__init__(context)
 
-        # 从配置中获取参数
         self.config = config
 
-        # 初始化数据库
         self.cdb = CommonDatabase()
         self.gdb_ops = GachaDBOperations(self.cdb)
         self.idb_ops = ItemDBOperations(self.cdb)
         self.item_manager = ItemManager(self.idb_ops)
 
-        # 初始化渲染
         self.enable_rendering = self.config.get("enable_rendering", True)
 
-        # 初始化代理配置
         proxy_url = self.config.get("proxy_url", "")
         enable_proxy = self.config.get("enable_proxy", False)
-
         if not enable_proxy:
-            proxy_url = None  # 如果未启用代理，强制不使用
-
+            proxy_url = None
         self.proxy_config = ProxyConfig(proxy_url if proxy_url else None)
 
         if self.enable_rendering:
@@ -59,37 +58,60 @@ class WutheringWavesGachaPlugin(Star):
             )
             self.renderer = GachaRenderer(self.ui_rs_manager)
 
-        # 初始化抽卡
         self.gacha_mechanics = GachaMechanics(self.item_manager)
         self.cp_manager = CardPoolManager()
 
-        # 是否保存渲染结果到本地
         self.save_rendered_results = self.config.get("save_rendered_results", False)
 
-        # WebUI 自动启动
+        # 数据库迁移：确保升级后数据兼容
+        try:
+            run_migrations(
+                self.cdb, self.idb_ops, self.item_manager, self.cp_manager
+            )
+        except Exception as e:
+            logger.error(f"数据库迁移失败（非致命错误）: {e}")
+
+        # WebUI 启停控制
+        if (
+            hasattr(self, "_webui_thread")
+            and self._webui_thread
+            and self._webui_thread.is_alive()
+        ):
+            logger.info("WebUI 正在重启，先停止旧实例...")
+            stop_server()
+            self._webui_thread = None
+
         if self.config.get("enable_webui", False):
             webui_port = self.config.get("webui_port", 5000)
             try:
-                import asyncio
-                import threading
-                from .src.web.server import run as run_webui
-
-                threading.Thread(
+                self._webui_thread = threading.Thread(
                     target=run_webui,
                     kwargs={"host": "0.0.0.0", "port": webui_port, "debug": False},
                     daemon=True,
-                ).start()
+                )
+                self._webui_thread.start()
                 logger.info(f"WebUI 已自动启动于 http://0.0.0.0:{webui_port}")
             except Exception as e:
                 logger.error(f"启动 WebUI 失败: {e}")
 
         logger.info("鸣潮模拟抽卡插件已初始化")
 
+    # ------------------------------------------------------------------
+    # 辅助方法
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _user_kv_key(sender_id: str) -> str:
+        return f"user_default_pool_{hashlib.md5(sender_id.encode()).hexdigest()[:8]}"
+
     def _save_rendered_image(self, image, user_id: str):
         if not self.save_rendered_results:
             return
         try:
-            output_path = Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim")) / "rendered_results"
+            output_path = (
+                Path(StarTools.get_data_dir("astrbot_plugin_ww_gacha_sim"))
+                / "rendered_results"
+            )
             output_path.mkdir(parents=True, exist_ok=True)
             timestamp = int(time.time())
             filename = f"gacha_result_{user_id}_{timestamp}.png"
@@ -99,23 +121,62 @@ class WutheringWavesGachaPlugin(Star):
         except Exception as e:
             logger.error(f"保存抽卡结果图片失败: {e}")
 
-    # 重新实现 _get_target_config 为普通异步方法，返回 (config, message_yield)
-    async def _resolve_pool_config(self, event: AstrMessageEvent, pool_identifier: str):
+    @staticmethod
+    def _image_as_chain(image) -> list:
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        buf.seek(0)
+        return [Image.fromBytes(buf.getvalue())]
+
+    @staticmethod
+    def _rarity_stars(rarity: str) -> str:
+        return (
+            "★★★★★"
+            if rarity == "5star"
+            else "★★★★"
+            if rarity == "4star"
+            else "★★★"
+        )
+
+    def _find_pool_config(self, pool_identifier: str) -> CardPoolConfig | list[CardPoolConfig] | None:
+        """三阶段查找：cp_id → config_path → name，返回 None 表示未找到"""
+        target = None
+        try:
+            target = self.cp_manager.get_config_by_cp_id(pool_identifier)
+        except KeyError:
+            pass
+        if target is None:
+            try:
+                target = self.cp_manager.get_config(pool_identifier)
+            except KeyError:
+                pass
+        if target is None:
+            matched = self.cp_manager.get_config_by_name(pool_identifier)
+            if len(matched) == 1:
+                target = matched[0]
+            elif len(matched) > 1:
+                return matched
+        return target
+
+    async def _resolve_pool_config(self, event, pool_identifier: str):
         sender_id = str(event.get_sender_id())
+        kv_key = self._user_kv_key(sender_id)
         config_ids = self.cp_manager.get_config_ids()
 
         if not config_ids:
             return None, event.plain_result("当前没有可用的卡池配置，请先创建卡池配置文件。")
 
         if pool_identifier == "":
-            saved_cp_id = await self.get_kv_data(f"user_default_pool_{sender_id}", default=None)
+            saved_cp_id = await self.get_kv_data(kv_key, default=None)
             if saved_cp_id and saved_cp_id in config_ids:
                 pool_identifier = saved_cp_id
             else:
                 pool_identifier = config_ids[0]
                 if saved_cp_id and saved_cp_id not in config_ids:
-                    await self.delete_kv_data(f"user_default_pool_{sender_id}")
-                    logger.info(f"用户 {sender_id} 的默认卡池 {saved_cp_id} 不存在，已清理")
+                    await self.delete_kv_data(kv_key)
+                    logger.info(
+                        f"用户 {sender_id} 的默认卡池 {saved_cp_id} 不存在，已清理"
+                    )
 
         target_config = self.cp_manager.find_config_by_identifier(pool_identifier)
 
@@ -132,31 +193,28 @@ class WutheringWavesGachaPlugin(Star):
             return None, event.plain_result(pool_list)
 
         if not target_config.enable:
-            return None, event.plain_result(f"卡池「{target_config.name}」已被禁用，无法进行抽卡。")
+            return None, event.plain_result(
+                f"卡池「{target_config.name}」已被禁用，无法进行抽卡。"
+            )
 
         return target_config, None
 
+    # ------------------------------------------------------------------
+    # 命令处理器
+    # ------------------------------------------------------------------
+
     @filter.command("单抽", alias={"单次抽卡", "抽卡", "单次唤取"})
     async def single_pull(self, event: AstrMessageEvent, pool_identifier: str = ""):
-        """
-        单次抽卡命令，默认使用用户设置的默认卡池
-        """
         try:
-            target_config, error_msg = await self._resolve_pool_config(event, pool_identifier)
+            target_config, error_msg = await self._resolve_pool_config(
+                event, pool_identifier
+            )
             if error_msg:
                 yield error_msg
                 return
-            
+
             sender_id = str(event.get_sender_id())
-
-            # 根据卡池配置的 config_group 创建对应的 ItemManager
-            config_group = getattr(target_config, "config_group", "default")
-            item_manager = ItemManager(self.idb_ops, config_group)
-
-            # 创建抽卡流程实例并执行单次抽卡
-            gacha_flow = GachaFlow(sender_id, self.gdb_ops, item_manager)
-
-            # 执行单次抽卡
+            gacha_flow = GachaFlow(sender_id, self.gdb_ops, self.item_manager)
             pull_result = gacha_flow.single_pull(target_config)
             item_obj = pull_result.get("item_obj")
 
@@ -164,46 +222,24 @@ class WutheringWavesGachaPlugin(Star):
                 yield event.plain_result("抽卡过程中出现错误，未能获得有效物品。")
                 return
 
-            # 判断是否需要渲染图片
-            should_render = self.enable_rendering
-
-            if should_render:
-                # 获取发送者昵称
-                sender_name = event.get_sender_name() if hasattr(event, "get_sender_name") else "未知用户"
-                
-                # 渲染抽卡结果图片 (使用 asyncio.to_thread 避免阻塞)
-                import asyncio
+            if self.enable_rendering:
+                sender_name = (
+                    event.get_sender_name()
+                    if hasattr(event, "get_sender_name")
+                    else "未知用户"
+                )
                 rendered_image = await asyncio.to_thread(
-                    self.renderer.render_single_pull, 
-                    item_obj, 
-                    nickname=sender_name, 
-                    user_id=sender_id
+                    self.renderer.render_single_pull,
+                    item_obj,
+                    nickname=sender_name,
+                    user_id=sender_id,
                 )
-
-                # 将图片转换为字节数据并发送
-                import io
-                from astrbot.core.message.components import Image
-
                 self._save_rendered_image(rendered_image, sender_id)
-
-                img_byte_arr = io.BytesIO()
-                rendered_image.save(img_byte_arr, format="PNG")
-                img_byte_arr.seek(0)
-
-                # 直接使用 Image.fromBytes() 从字节数据创建图片组件
-                yield event.chain_result([Image.fromBytes(img_byte_arr.getvalue())])
+                yield event.chain_result(self._image_as_chain(rendered_image))
             else:
-                # 发送文本结果
-                item_rarity = item_obj.rarity
-                star_display = (
-                    "★★★★★"
-                    if item_rarity == "5star"
-                    else "★★★★"
-                    if item_rarity == "4star"
-                    else "★★★"
+                yield event.plain_result(
+                    f"单次抽卡结果：\n{self._rarity_stars(item_obj.rarity)} {item_obj.name}"
                 )
-                result_text = f"单次抽卡结果：\n{star_display} {item_obj.name}"
-                yield event.plain_result(result_text)
 
         except Exception as e:
             logger.error(f"单次抽卡失败: {e}")
@@ -211,78 +247,41 @@ class WutheringWavesGachaPlugin(Star):
 
     @filter.command("十抽", alias={"十连", "10抽", "10连"})
     async def ten_pulls(self, event: AstrMessageEvent, pool_identifier: str = ""):
-        """
-        十连抽卡命令，默认使用用户设置的默认卡池
-
-        参数:
-            event: 消息事件对象
-            pool_identifier: 卡池标识符（可选），可以是 cp_id、配置文件路径或卡池名称，如果不提供则使用默认卡池
-        """
         try:
-            target_config, error_msg = await self._resolve_pool_config(event, pool_identifier)
+            target_config, error_msg = await self._resolve_pool_config(
+                event, pool_identifier
+            )
             if error_msg:
                 yield error_msg
                 return
 
             sender_id = str(event.get_sender_id())
-
-            # 根据卡池配置的 config_group 创建对应的 ItemManager
-            config_group = getattr(target_config, "config_group", "default")
-            item_manager = ItemManager(self.idb_ops, config_group)
-
-            # 创建抽卡流程实例并执行十连抽
-            gacha_flow = GachaFlow(sender_id, self.gdb_ops, item_manager)
-
-            # 执行十连抽
+            gacha_flow = GachaFlow(sender_id, self.gdb_ops, self.item_manager)
             item_objs = gacha_flow.ten_consecutive_pulls(target_config)
 
             if not item_objs:
                 yield event.plain_result("抽卡过程中出现错误，未能获得有效物品。")
                 return
 
-            # 判断是否需要渲染图片
-            should_render = self.enable_rendering
-
-            if should_render:
-                # 获取发送者昵称
-                sender_name = event.get_sender_name() if hasattr(event, "get_sender_name") else "未知用户"
-
-                # 渲染十连抽结果图片
-                import asyncio
-                rendered_image = await asyncio.to_thread(
-                    self.renderer.render_ten_pulls, 
-                    item_objs, 
-                    nickname=sender_name, 
-                    user_id=sender_id
+            if self.enable_rendering:
+                sender_name = (
+                    event.get_sender_name()
+                    if hasattr(event, "get_sender_name")
+                    else "未知用户"
                 )
-
-                # 将图片转换为字节数据并发送
-                import io
-
-                from astrbot.core.message.components import Image
-
+                rendered_image = await asyncio.to_thread(
+                    self.renderer.render_ten_pulls,
+                    item_objs,
+                    nickname=sender_name,
+                    user_id=sender_id,
+                )
                 self._save_rendered_image(rendered_image, sender_id)
-
-                img_byte_arr = io.BytesIO()
-                rendered_image.save(img_byte_arr, format="PNG")
-                img_byte_arr.seek(0)
-
-                # 直接使用 Image.fromBytes() 从字节数据创建图片组件
-                yield event.chain_result([Image.fromBytes(img_byte_arr.getvalue())])
+                yield event.chain_result(self._image_as_chain(rendered_image))
             else:
-                # 发送文本结果
-                result_text = "十连抽卡结果：\n"
-                for idx, item_obj in enumerate(item_objs, 1):
-                    item_rarity = item_obj.rarity
-                    star_display = (
-                        "★★★★★"
-                        if item_rarity == "5star"
-                        else "★★★★"
-                        if item_rarity == "4star"
-                        else "★★★"
-                    )
-                    result_text += f"{idx}. {star_display} {item_obj.name}\n"
-                yield event.plain_result(result_text)
+                lines = ["十连抽卡结果："]
+                for idx, obj in enumerate(item_objs, 1):
+                    lines.append(f"{idx}. {self._rarity_stars(obj.rarity)} {obj.name}")
+                yield event.plain_result("\n".join(lines))
 
         except Exception as e:
             logger.error(f"十连抽卡失败: {e}")
@@ -290,248 +289,144 @@ class WutheringWavesGachaPlugin(Star):
 
     @filter.command("卡池", alias={"卡池列表", "查看卡池"})
     async def list_card_pools(self, event: AstrMessageEvent):
-        """
-        查看所有可用卡池
-
-        参数:
-            event: 消息事件对象
-        """
         try:
-            # 获取所有卡池配置 cp_id
             config_ids = self.cp_manager.get_config_ids()
-
             if not config_ids:
-                yield event.plain_result(
-                    "当前没有可用的卡池配置，请先创建卡池配置文件。"
-                )
+                yield event.plain_result("当前没有可用的卡池配置，请先创建卡池配置文件。")
                 return
 
-            # 格式化卡池列表
-            pool_list = "当前可用的卡池：\n"
+            lines = ["当前可用的卡池："]
             for i, cp_id in enumerate(config_ids, 1):
                 try:
-                    # 获取卡池配置详情
                     config = self.cp_manager.get_config_by_cp_id(cp_id)
-                    # 只显示启用的卡池
                     if config.enable:
-                        pool_list += f"{i}. {config.name} - ID: {config.cp_id}\n"
+                        lines.append(
+                            f"{i}. {config.name} - ID: {config.cp_id}"
+                        )
                 except Exception as e:
                     logger.warning(f"获取卡池 {cp_id} 详情失败: {e}")
-                    pool_list += f"{i}. {cp_id} (获取详情失败)\n"
+                    lines.append(f"{i}. {cp_id} (获取详情失败)")
 
-            pool_list += "\n使用 `/单抽 <卡池ID或名称>` 命令开始抽卡。"
-
-            yield event.plain_result(pool_list)
+            lines.append("使用 `/单抽 <卡池ID或名称>` 命令开始抽卡。")
+            yield event.plain_result("\n".join(lines))
 
         except Exception as e:
             logger.error(f"获取卡池列表失败: {e}")
-            yield event.plain_result(
-                "获取卡池列表时发生错误，请检查插件配置或联系管理员。"
-            )
+            yield event.plain_result("获取卡池列表时发生错误，请检查插件配置或联系管理员。")
 
     @filter.command("唤取", alias={"选抽", "设置卡池", "选择卡池"})
     async def set_default_pool(
         self, event: AstrMessageEvent, pool_identifier: str = "examples/默认卡池"
     ):
-        """
-        设置用户默认卡池
-
-        参数:
-            event: 消息事件对象
-            pool_identifier: 卡池标识符，可以是 cp_id、配置文件路径或卡池名称
-        """
         try:
             if not pool_identifier:
-                yield event.plain_result(
-                    "请指定要设置的卡池名称。使用方法：/唤取 <卡池名称>"
-                )
+                yield event.plain_result("请指定要设置的卡池名称。使用方法：/唤取 <卡池名称>")
                 return
 
-            # 获取所有可用的卡池配置 cp_id
             config_ids = self.cp_manager.get_config_ids()
-
             if not config_ids:
-                yield event.plain_result(
-                    "当前没有可用的卡池配置，请先创建卡池配置文件。"
-                )
+                yield event.plain_result("当前没有可用的卡池配置，请先创建卡池配置文件。")
                 return
 
-            # 查找匹配的卡池配置
-            target_config = None
+            found = self._find_pool_config(pool_identifier)
+            if isinstance(found, list):
+                lines = [f"找到 {len(found)} 个名为「{pool_identifier}」的卡池，请选择："]
+                for i, c in enumerate(found, 1):
+                    lines.append(f"{i}. {c.name} (ID: {c.cp_id})")
+                lines.append("请使用 `/唤取 <卡池ID>` 来指定具体卡池。")
+                yield event.plain_result("\n".join(lines))
+                return
 
-            # 尝试通过 cp_id (UUID) 查找（优先级最高）
-            try:
-                target_config = self.cp_manager.get_config_by_cp_id(pool_identifier)
-                logger.info(f"通过 cp_id 找到卡池: {pool_identifier}")
-            except KeyError:
-                # cp_id 匹配失败，继续尝试其他匹配方式
-                pass
-
-            # 如果没找到，尝试通过相对路径精确匹配
-            if target_config is None:
-                try:
-                    target_config = self.cp_manager.get_config(pool_identifier)
-                    logger.info(f"通过相对路径找到卡池: {pool_identifier}")
-                except KeyError:
-                    pass
-
-            # 如果没找到，尝试通过卡池显示名称匹配
-            if target_config is None:
-                matched_configs = self.cp_manager.get_config_by_name(pool_identifier)
-                if matched_configs:
-                    if len(matched_configs) == 1:
-                        # 只有一个匹配，直接使用
-                        target_config = matched_configs[0]
-                        target_cp_id = target_config.cp_id
-                        logger.info(
-                            f"通过卡池名称找到卡池: {pool_identifier}, cp_id: {target_cp_id}"
-                        )
-                    else:
-                        # 多个匹配，列出可选卡池
-                        pool_list = f"找到 {len(matched_configs)} 个名为「{pool_identifier}」的卡池，请选择：\n"
-                        for i, config in enumerate(matched_configs, 1):
-                            pool_list += f"{i}. {config.name} (ID: {config.cp_id})\n"
-                        pool_list += "\n请使用 `/唤取 <卡池ID>` 来指定具体卡池。"
-
-                        yield event.plain_result(pool_list)
-                        return
-
-            if target_config is None:
-                pool_list = "找不到指定的卡池。可用的卡池有：\n"
+            if found is None:
+                lines = ["找不到指定的卡池。可用的卡池有："]
                 for i, cp_id in enumerate(config_ids, 1):
                     try:
                         config = self.cp_manager.get_config_by_cp_id(cp_id)
-                        # 只显示启用的卡池
                         if config.enable:
-                            pool_list += f"{i}. {config.name} - ID: {config.cp_id}\n"
+                            lines.append(
+                                f"{i}. {config.name} - ID: {config.cp_id}"
+                            )
                     except Exception as e:
                         logger.warning(f"获取卡池 {cp_id} 详情失败: {e}")
-                        pool_list += f"{i}. {cp_id} (获取详情失败)\n"
-
-                yield event.plain_result(pool_list)
+                        lines.append(f"{i}. {cp_id} (获取详情失败)")
+                yield event.plain_result("\n".join(lines))
                 return
 
-            # 检查配置是否启用
-            if not target_config.enable:
+            if not found.enable:
                 yield event.plain_result(
-                    f"卡池「{target_config.name}」已被禁用，无法设置为默认卡池。"
+                    f"卡池「{found.name}」已被禁用，无法设置为默认卡池。"
                 )
                 return
 
-            # 获取发送者ID作为用户标识
             sender_id = str(event.get_sender_id())
-
-            # 使用KV存储保存用户的默认卡池设置（保存 cp_id 以支持配置文件移动）
-            await self.put_kv_data(
-                f"user_default_pool_{sender_id}", target_config.cp_id
-            )
+            kv_key = self._user_kv_key(sender_id)
+            await self.put_kv_data(kv_key, found.cp_id)
 
             yield event.plain_result(
-                f"已设置您的默认卡池为：{target_config.name} (ID: {target_config.cp_id})\n现在您可以使用 `/抽卡` 命令进行抽卡，将默认使用此卡池。"
+                f"已设置您的默认卡池为：{found.name} (ID: {found.cp_id})\n现在您可以使用 `/抽卡` 命令进行抽卡，将默认使用此卡池。"
             )
 
         except Exception as e:
             logger.error(f"设置默认卡池失败: {e}")
-            yield event.plain_result(
-                "设置默认卡池时发生错误，请检查插件配置或联系管理员。"
-            )
+            yield event.plain_result("设置默认卡池时发生错误，请检查插件配置或联系管理员。")
 
     @filter.command("唤取记录", alias={"抽卡记录", "查看抽卡", "抽卡历史"})
-    async def view_pull_history(self, event: AstrMessageEvent, page_or_pool: str = "1"):
-        """
-        查看当前会话用户的历史抽卡记录
-
-        参数:
-            event: 消息事件对象
-            page_or_pool: 页码或卡池标识符，默认为1，每页显示10条记录
-        """
+    async def view_pull_history(
+        self, event: AstrMessageEvent, page_or_pool: str = "1"
+    ):
         try:
-            # 获取发送者ID作为用户标识
             sender_id = str(event.get_sender_id())
-
-            # 每页显示10条记录
             page_size = 10
-
-            # 解析参数，判断是页码还是卡池标识符
             page = 1
             pool_identifier = None
             pool_id = None
             pool_name_display = "全部卡池"
 
             try:
-                # 尝试解析为页码
                 page = int(page_or_pool)
             except ValueError:
-                # 不是页码，作为卡池标识符
                 pool_identifier = page_or_pool
-
-                # 查找匹配的卡池
                 if pool_identifier:
-                    # 获取所有可用的卡池配置 cp_id
                     config_ids = self.cp_manager.get_config_ids()
-
                     if not config_ids:
                         yield event.plain_result(
                             "当前没有可用的卡池配置，请先创建卡池配置文件。"
                         )
                         return
 
-                    # 尝试通过 cp_id 查找
-                    try:
-                        target_config = self.cp_manager.get_config_by_cp_id(
-                            pool_identifier
+                    found = self._find_pool_config(pool_identifier)
+                    if isinstance(found, list):
+                        lines = [
+                            f"找到 {len(found)} 个名为「{pool_identifier}」的卡池，请选择："
+                        ]
+                        for i, c in enumerate(found, 1):
+                            lines.append(f"{i}. {c.name} - ID: {c.cp_id}")
+                        lines.append(
+                            "请使用 `/抽卡记录 <卡池ID>` 来指定具体卡池。"
                         )
-                        pool_id = target_config.cp_id
-                        pool_name_display = target_config.name
-                        logger.info(f"通过 cp_id 找到卡池: {pool_identifier}")
-                    except KeyError:
-                        # 尝试通过名称查找
-                        matched_configs = self.cp_manager.get_config_by_name(
-                            pool_identifier
-                        )
-                        if matched_configs:
-                            if len(matched_configs) == 1:
-                                # 只有一个匹配，直接使用
-                                target_config = matched_configs[0]
-                                pool_id = target_config.cp_id
-                                pool_name_display = target_config.name
-                                logger.info(
-                                    f"通过卡池名称找到卡池: {pool_identifier}, cp_id: {pool_id}"
-                                )
-                            else:
-                                # 多个匹配，列出可选卡池
-                                pool_list = f"找到 {len(matched_configs)} 个名为「{pool_identifier}」的卡池，请选择：\n"
-                                for i, config in enumerate(matched_configs, 1):
-                                    pool_list += (
-                                        f"{i}. {config.name} - ID: {config.cp_id}\n"
+                        yield event.plain_result("\n".join(lines))
+                        return
+                    if found is not None:
+                        pool_id = found.cp_id
+                        pool_name_display = found.name
+                    else:
+                        lines = [
+                            f"找不到指定的卡池: {pool_identifier}\n\n可用的卡池有："
+                        ]
+                        for i, cp_id in enumerate(config_ids, 1):
+                            try:
+                                config = self.cp_manager.get_config_by_cp_id(cp_id)
+                                if config.enable:
+                                    lines.append(
+                                        f"{i}. {config.name} - ID: {cp_id}"
                                     )
-                                pool_list += (
-                                    "\n请使用 `/抽卡记录 <卡池ID>` 来指定具体卡池。"
-                                )
+                            except Exception as e:
+                                logger.warning(f"获取卡池 {cp_id} 详情失败: {e}")
+                                lines.append(f"{i}. {cp_id} (获取详情失败)")
+                        yield event.plain_result("\n".join(lines))
+                        return
 
-                                yield event.plain_result(pool_list)
-                                return
-                        else:
-                            # 没有找到匹配的卡池
-                            pool_list = f"找不到指定的卡池: {pool_identifier}\n\n可用的卡池有：\n"
-                            for i, cp_id in enumerate(config_ids, 1):
-                                try:
-                                    config = self.cp_manager.get_config_by_cp_id(cp_id)
-                                    if config.enable:
-                                        pool_list += (
-                                            f"{i}. {config.name} - ID: {cp_id}\n"
-                                        )
-                                except Exception as e:
-                                    logger.warning(f"获取卡池 {cp_id} 详情失败: {e}")
-                                    pool_list += f"{i}. {cp_id} (获取详情失败)\n"
-
-                            yield event.plain_result(pool_list)
-                            return
-
-            # 计算偏移量
             offset = (page - 1) * page_size
-
-            # 获取抽卡历史记录
             pull_history = self.gdb_ops.load_pull_history(
                 user_id=sender_id,
                 limit=page_size,
@@ -540,49 +435,36 @@ class WutheringWavesGachaPlugin(Star):
                 pool_id=pool_id,
             )
 
-            # 获取总记录数
             total_records = self.gdb_ops.get_pull_history_count(
                 sender_id, pool_id=pool_id
             )
-
-            # 计算总页数
             total_pages = (total_records + page_size - 1) // page_size
 
-            # 如果没有记录
             if total_records == 0:
-                if pool_identifier:
-                    yield event.plain_result("您在该卡池还没有任何抽卡记录。")
-                else:
-                    yield event.plain_result("您还没有任何抽卡记录。")
+                yield event.plain_result(
+                    "您在该卡池还没有任何抽卡记录。"
+                    if pool_identifier
+                    else "您还没有任何抽卡记录。"
+                )
                 return
 
-            # 如果页码超出范围
             if page < 1 or page > total_pages:
                 yield event.plain_result(
                     f"页码超出范围。当前共有 {total_records} 条记录，分为 {total_pages} 页。"
                 )
                 return
 
-            # 如果启用渲染功能，发送图片
             if self.enable_rendering:
-                # 丰富记录数据（添加类型信息）
                 all_items = self.item_manager.get_all_items()
-                name_to_type = {}
-                for item_data in all_items.values():
-                    name_to_type[item_data["name"]] = item_data["type"]
-
+                name_to_type = {
+                    d["name"]: d["type"] for d in all_items.values()
+                }
                 enriched_history = []
                 for record in pull_history:
-                    item_name = record["item"]
-                    # 从缓存中查找类型
-                    item_type = name_to_type.get(item_name, "unknown")
+                    r = record.copy()
+                    r["type"] = name_to_type.get(record["item"], "unknown")
+                    enriched_history.append(r)
 
-                    record_copy = record.copy()
-                    record_copy["type"] = item_type
-                    enriched_history.append(record_copy)
-
-                # 渲染图片
-                import asyncio
                 rendered_image = await asyncio.to_thread(
                     self.renderer.render_history,
                     enriched_history,
@@ -591,47 +473,25 @@ class WutheringWavesGachaPlugin(Star):
                     total_records,
                     pool_name=pool_name_display,
                 )
-
-                # 发送图片
-                import io
-
-                from astrbot.core.message.components import Image
-
-                img_byte_arr = io.BytesIO()
-                rendered_image.save(img_byte_arr, format="PNG")
-                img_byte_arr.seek(0)
-
-                yield event.chain_result([Image.fromBytes(img_byte_arr.getvalue())])
+                yield event.chain_result(self._image_as_chain(rendered_image))
                 return
 
-            # 格式化抽卡记录
-            result_text = f"您的历史抽卡记录 (第 {page}/{total_pages} 页，共 {total_records} 条):\n\n"
-
+            lines = [
+                f"您的历史抽卡记录 (第 {page}/{total_pages} 页，共 {total_records} 条):\n"
+            ]
             for record in pull_history:
-                # 格式化稀有度显示
-                rarity_display = (
-                    "★★★★★"
-                    if record["rarity"] == "5star"
-                    else "★★★★"
-                    if record["rarity"] == "4star"
-                    else "★★★"
+                lines.append(
+                    f"{self._rarity_stars(record['rarity'])} {record['item']} - {record['pull_time']}"
                 )
-                # 格式化时间
-                pull_time = record["pull_time"]
-                # 构建记录行
-                result_text += f"{rarity_display} {record['item']} - {pull_time}\n"
-
-            # 添加分页提示
             if total_pages > 1:
-                result_text += (
-                    f"\n使用 `/抽卡记录 {page + 1}` 查看下一页"
-                    if page < total_pages
-                    else "\n已经是最后一页"
-                )
+                if page < total_pages:
+                    lines.append(f"\n使用 `/抽卡记录 {page + 1}` 查看下一页")
+                else:
+                    lines.append("\n已经是最后一页")
                 if page > 1:
-                    result_text += f"，使用 `/抽卡记录 {page - 1}` 查看上一页"
+                    lines.append(f"使用 `/抽卡记录 {page - 1}` 查看上一页")
 
-            yield event.plain_result(result_text)
+            yield event.plain_result("\n".join(lines))
 
         except Exception as e:
             logger.error(f"查看抽卡历史记录失败: {e}")
@@ -640,71 +500,88 @@ class WutheringWavesGachaPlugin(Star):
             )
 
     @filter.command("卡池详细")
-    async def pool_detail(self, event: AstrMessageEvent, pool_identifier: str):
-        """
-        查询指定卡池的详细配置信息
-        
-        参数:
-            event: 消息事件对象
-            pool_identifier: 卡池ID或名称
-        """
+    async def pool_detail(
+        self, event: AstrMessageEvent, pool_identifier: str
+    ):
         try:
-            # 查找匹配的卡池配置
-            target_config = None
-            
-            # 尝试通过 cp_id (UUID) 查找
-            try:
-                target_config = self.cp_manager.get_config_by_cp_id(pool_identifier)
-            except KeyError:
-                pass
-
-            # 尝试通过相对路径精确匹配
-            if target_config is None:
-                try:
-                    target_config = self.cp_manager.get_config(pool_identifier)
-                except KeyError:
-                    pass
-
-            # 尝试通过卡池显示名称匹配
-            if target_config is None:
-                matched_configs = self.cp_manager.get_config_by_name(pool_identifier)
-                if matched_configs:
-                    if len(matched_configs) == 1:
-                        target_config = matched_configs[0]
-                    else:
-                        # 多个匹配，提示用户更精确
-                        names = [c.name for c in matched_configs]
-                        yield event.plain_result(f"找到多个匹配的卡池: {', '.join(names)}，请使用更精确的名称或ID。")
-                        return
-
-            if target_config is None:
-                yield event.plain_result(f"未找到匹配的卡池: {pool_identifier}")
+            found = self._find_pool_config(pool_identifier)
+            if isinstance(found, list):
+                names = [c.name for c in found]
+                yield event.plain_result(
+                    f"找到多个匹配的卡池: {', '.join(names)}，请使用更精确的名称或ID。"
+                )
+                return
+            if found is None:
+                yield event.plain_result(
+                    f"未找到匹配的卡池: {pool_identifier}"
+                )
                 return
 
             if not self.enable_rendering:
                 yield event.plain_result("未启用渲染功能，无法生成卡池详情图。")
                 return
 
-            # 渲染详情图
-            import asyncio
-            image = await asyncio.to_thread(self.renderer.render_pool_detail, target_config)
-            
-            # 发送图片
-            import io
-            from astrbot.core.message.components import Image as AstrImage
-            
-            img_byte_arr = io.BytesIO()
-            image.save(img_byte_arr, format="PNG")
-            img_byte_arr.seek(0)
-            
-            yield event.chain_result([AstrImage.fromBytes(img_byte_arr.getvalue())])
-            
+            image = await asyncio.to_thread(
+                self.renderer.render_pool_detail, found
+            )
+            yield event.chain_result(self._image_as_chain(image))
+
         except Exception as e:
             logger.error(f"查询卡池详情失败: {e}")
             yield event.plain_result(f"查询失败: {e}")
 
+    @filter.command("重载卡池", alias={"刷新卡池", "reload_pools"})
+    async def reload_pools(self, event: AstrMessageEvent):
+        try:
+            configs = self.cp_manager.reload_all()
+            yield event.plain_result(f"已重新加载 {len(configs)} 个卡池配置。")
+        except Exception as e:
+            logger.error(f"重载卡池配置失败: {e}")
+            yield event.plain_result("重载卡池配置时发生错误。")
+
+    @filter.command("wgs_help", alias={"抽卡帮助", "鸣潮帮助"})
+    async def wgs_help(self, event: AstrMessageEvent):
+        try:
+            from astrbot.core.star.star_handler import star_handlers_registry
+            from astrbot.core.star.filter.command import CommandFilter
+
+            handlers = star_handlers_registry.get_handlers_by_module_name(
+                self.__module__
+            )
+
+            lines = ["鸣潮模拟抽卡插件 - 可用命令：\n"]
+            parts = []
+
+            for handler in handlers:
+                for f in handler.event_filters:
+                    if not isinstance(f, CommandFilter):
+                        continue
+                    names = f.get_complete_command_names()
+                    if not names:
+                        continue
+                    primary = names[0]
+                    aliases = [n for n in names[1:] if n != primary][:3]
+                    desc = handler.desc or "无说明"
+                    alias_str = (
+                        f"（{'/'.join(aliases)}）" if aliases else ""
+                    )
+                    parts.append(f"  /{primary} {alias_str}\n    {desc}")
+
+            parts.sort()
+            lines.extend(parts)
+
+            yield event.plain_result("\n".join(lines))
+        except Exception as e:
+            logger.error(f"获取帮助失败: {e}")
+            yield event.plain_result("获取帮助信息时发生错误。")
+
     async def terminate(self):
-        """
-        插件销毁方法，在插件卸载时调用
-        """
+        if (
+            hasattr(self, "_webui_thread")
+            and self._webui_thread
+            and self._webui_thread.is_alive()
+        ):
+            logger.info("正在停止 WebUI...")
+            stop_server()
+            self._webui_thread = None
         logger.info("鸣潮模拟抽卡插件已卸载")

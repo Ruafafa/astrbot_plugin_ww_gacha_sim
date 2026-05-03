@@ -23,6 +23,8 @@ PLUGIN_PATH = Path(__file__).resolve().parent.parent.parent
 class CommonDatabase:
     """通用数据库操作类"""
 
+    SCHEMA_VERSION = 1  # 当前数据库架构版本
+
     def __init__(
         self,
         db_path: Path | None = None,
@@ -38,11 +40,12 @@ class CommonDatabase:
         else:
             self.db_path = db_path
         self._ensure_directory_exists()
-        
+
         # 线程局部存储，用于复用数据库连接
         self._local = threading.local()
-        
+
         self.init_db()
+        self._init_metadata_table()
 
     def _ensure_directory_exists(self):
         """确保数据库所在目录存在"""
@@ -189,6 +192,33 @@ class CommonDatabase:
         except sqlite3.Error as e:
             logger.error(f"SQL脚本执行错误: {e}")
             raise
+
+    # ------------------------------------------------------------------
+    # Schema version tracking
+    # ------------------------------------------------------------------
+
+    def _init_metadata_table(self):
+        """创建元数据表用于跟踪数据库版本"""
+        self.execute_update("""
+            CREATE TABLE IF NOT EXISTS _metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+
+    def get_schema_version(self) -> int:
+        """获取当前数据库架构版本，不存在则返回 0"""
+        row = self.execute_query_single(
+            "SELECT value FROM _metadata WHERE key = 'schema_version'"
+        )
+        return int(row["value"]) if row else 0
+
+    def set_schema_version(self, version: int):
+        """设置数据库架构版本"""
+        self.execute_update(
+            "INSERT OR REPLACE INTO _metadata (key, value) VALUES ('schema_version', ?)",
+            (str(version),),
+        )
 
     def close(self):
         """关闭数据库连接（占位方法，实际由上下文管理器处理）"""

@@ -46,10 +46,19 @@ class ItemDBOperations:
                         type TEXT NOT NULL,
                         affiliated_type TEXT,
                         portrait_path TEXT,
-                        portrait_url TEXT
+                        portrait_url TEXT,
+                        apply_gradient INTEGER DEFAULT 0
                     )
                 """)
                 logger.debug(f"创建或验证{table_name}表")
+
+                # 迁移：为旧表添加 apply_gradient 列（先检查列是否存在）
+                cursor.execute(f"PRAGMA table_info({table_name})")
+                existing_cols = {row[1] for row in cursor.fetchall()}
+                if "apply_gradient" not in existing_cols:
+                    cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN apply_gradient INTEGER DEFAULT 0")
+                    conn.commit()
+                    logger.debug(f"为{table_name}表添加 apply_gradient 列")
 
                 # 创建物品表索引
                 cursor.execute(
@@ -130,8 +139,8 @@ class ItemDBOperations:
                         "rarity": formatted_rarity,
                         "type": row["type"],
                         "affiliated_type": row["affiliated_type"],
-                        "portrait_path": row["portrait_path"],
-                        "portrait_url": row.get("portrait_url", ""),
+                        "portrait_path": "",
+                        "portrait_url": row["portrait_url"],
                     }
                     default_items.append(item_data)
 
@@ -164,6 +173,10 @@ class ItemDBOperations:
         if "portrait_url" in row.keys():
             portrait_url = row["portrait_url"]
 
+        apply_gradient = False
+        if "apply_gradient" in row.keys() and row["apply_gradient"]:
+            apply_gradient = bool(row["apply_gradient"])
+
         return {
             "external_id": row["external_id"],
             "name": row["name"],
@@ -172,6 +185,7 @@ class ItemDBOperations:
             "affiliated_type": row["affiliated_type"],
             "portrait_path": row["portrait_path"],
             "portrait_url": portrait_url,
+            "apply_gradient": apply_gradient,
         }
 
     def load_all_items(self, table_name="items") -> dict[str, dict[str, Any]]:
@@ -315,8 +329,8 @@ class ItemDBOperations:
 
             result = self.db.execute_update(
                 f"""
-                INSERT INTO {table_name} 
-                (external_id, name, rarity, type, affiliated_type, portrait_path, portrait_url) 
+                INSERT INTO {table_name}
+                (external_id, name, rarity, type, affiliated_type, portrait_url, apply_gradient)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
                 (
@@ -325,8 +339,8 @@ class ItemDBOperations:
                     formatted_rarity,
                     item_data["type"],
                     item_data.get("affiliated_type", ""),
-                    item_data.get("portrait_path", ""),
                     item_data.get("portrait_url", ""),
+                    1 if item_data.get("apply_gradient") else 0,
                 ),
             )
             return result >= 0
@@ -386,15 +400,15 @@ class ItemDBOperations:
                         formatted_rarity,
                         item["type"],
                         item.get("affiliated_type", ""),
-                        item.get("portrait_path", ""),
                         item.get("portrait_url", ""),
+                        1 if item.get("apply_gradient") else 0,
                     )
                 )
 
             result = self.db.execute_many(
                 f"""
-                INSERT INTO {table_name} 
-                (external_id, name, rarity, type, affiliated_type, portrait_path, portrait_url) 
+                INSERT INTO {table_name}
+                (external_id, name, rarity, type, affiliated_type, portrait_url, apply_gradient)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
                 params_list,
@@ -451,8 +465,8 @@ class ItemDBOperations:
                 "rarity",
                 "type",
                 "affiliated_type",
-                "portrait_path",
                 "portrait_url",
+                "apply_gradient",
             ]
             fields = []
             values = []
@@ -469,6 +483,8 @@ class ItemDBOperations:
                         else:
                             formatted_rarity = str(rarity)
                         values.append(formatted_rarity)
+                    elif field == "apply_gradient":
+                        values.append(1 if value else 0)
                     else:
                         values.append(value)
                     fields.append(f"{field} = ?")
@@ -869,6 +885,61 @@ class ItemDBOperations:
         except Exception as e:
             logger.error(f"获取物品总数失败: {table_name}, 错误: {e}")
             raise
+
+    def sync_new_items_from_csv(self, table_name="items") -> int:
+        """从 CSV 同步新增的物品到数据库，仅插入不存在的物品，不覆盖已有数据。
+
+        用于插件升级时自动补充新增的角色/武器数据。
+
+        Args:
+            table_name: 物品表名称
+
+        Returns:
+            int: 本次同步新增的物品数量
+        """
+        import csv
+        from pathlib import Path
+
+        csv_path = (
+            Path(__file__).parent.parent
+            / "assets"
+            / "data"
+            / "default.csv"
+        )
+        if not csv_path.exists():
+            logger.warning(f"CSV 文件不存在，跳过物品同步: {csv_path}")
+            return 0
+
+        # 确保表已初始化
+        self._init_tables(table_name)
+
+        # 加载数据库中已有的物品（按 external_id 索引）
+        existing = self.load_all_items(table_name)
+
+        # 读取 CSV 并对比
+        added = 0
+        with open(csv_path, encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                item_dict = {
+                    "name": row["name"],
+                    "rarity": row["rarity"],
+                    "type": row["type"],
+                    "affiliated_type": row.get("affiliated_type", ""),
+                    "portrait_url": row.get("portrait_url", ""),
+                }
+                # 生成 external_id 并与数据库已有数据比对
+                external_id = self._generate_default_external_id(item_dict)
+                if external_id not in existing:
+                    item_dict["external_id"] = external_id
+                    if self.add_item(item_dict, table_name):
+                        added += 1
+
+        if added > 0:
+            logger.info(
+                f"同步 CSV → {table_name} 完成，新增 {added} 个物品"
+            )
+        return added
 
     def clear_table(self, table_name="items") -> bool:
         """
