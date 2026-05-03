@@ -1057,6 +1057,52 @@ def run(host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
     logger.info("WebUI 服务器已停止")
 
 
+async def run_async(host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
+    """
+    以 asyncio 任务形式运行 WebUI 服务器。
+    在主事件循环中使用，通过 asyncio.create_task 或类似机制调用。
+    避免线程方式下 signal.set_wakeup_fd / add_signal_handler 的限制。
+    """
+    app.config["DEBUG"] = debug
+    app.config["SERVER_HOST"] = host
+    app.config["SERVER_PORT"] = port
+
+    logger.info(f"WebUI 服务器正在启动，监听 {host}:{port}")
+
+    # 存储 shutdown 事件到 app.config，供 stop_server_async 触发停止
+    _shutdown_event = asyncio.Event()
+    app.config["_SHUTDOWN_EVENT"] = _shutdown_event
+
+    try:
+        await app.run_task(
+            host=host, port=port, debug=debug,
+            shutdown_trigger=lambda: _shutdown_event.wait(),
+        )
+    except asyncio.CancelledError:
+        logger.info("WebUI 服务器任务已取消")
+        raise
+    except Exception as e:
+        logger.error(f"WebUI 服务器运行异常: {e}")
+        raise
+    finally:
+        logger.info("WebUI 服务器已停止")
+        app.config.pop("_SHUTDOWN_EVENT", None)
+
+
+async def stop_server_async():
+    """停止异步运行的 WebUI 服务器（设置 shutdown_trigger 事件）。"""
+    logger.info("正在停止 WebUI 服务...")
+    _shutdown_event = app.config.get("_SHUTDOWN_EVENT")
+    if _shutdown_event:
+        _shutdown_event.set()
+    else:
+        logger.warning("未找到 WebUI shutdown 事件，可能服务未运行")
+    if _shutdown_event:
+        _shutdown_event.set()
+    else:
+        logger.warning("未找到 WebUI shutdown 事件")
+
+
 def parse_arguments():
     """
     解析命令行参数

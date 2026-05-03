@@ -23,7 +23,7 @@ from .src.render.local_file_cache_manager import LocalFileCacheManager
 from .src.render.proxy_config import ProxyConfig
 from .src.render.resource_loader import ResourceLoader
 from .src.render.ui_resources_manager import UIResourceManager
-from .src.web.server import stop_server, run as run_webui
+from .src.web.server import stop_server, run as run_webui, run_async as run_webui_async, stop_server_async
 
 
 class WutheringWavesGachaPlugin(Star):
@@ -73,17 +73,28 @@ class WutheringWavesGachaPlugin(Star):
 
         # WebUI 自动启动
         self._webui_thread = None
+        self._webui_task = None
         if self.config.get("enable_webui", False):
             webui_port = int(self.config.get("webui_port", 5000))
-            logger.info(f"WebUI 配置已启用，正在启动后台服务 (0.0.0.0:{webui_port})...")
+            logger.info(f"WebUI 配置已启用，正在启动 (0.0.0.0:{webui_port})...")
             try:
-                self._webui_thread = threading.Thread(
-                    target=run_webui,
-                    kwargs={"host": "0.0.0.0", "port": webui_port, "debug": False},
-                    daemon=True,
-                )
-                self._webui_thread.start()
-                logger.info(f"WebUI 线程已创建并启动 (daemon=True)，正在监听 0.0.0.0:{webui_port}")
+                # 优先使用 asyncio 任务（主事件循环），避免线程下
+                # signal.set_wakeup_fd / add_signal_handler 的限制
+                try:
+                    loop = asyncio.get_running_loop()
+                    self._webui_task = loop.create_task(
+                        run_webui_async(host="0.0.0.0", port=webui_port, debug=False)
+                    )
+                    logger.info(f"WebUI 已通过 asyncio 任务启动 (0.0.0.0:{webui_port})")
+                except RuntimeError:
+                    # 没有运行中的事件循环，回退到线程方式
+                    self._webui_thread = threading.Thread(
+                        target=run_webui,
+                        kwargs={"host": "0.0.0.0", "port": webui_port, "debug": False},
+                        daemon=True,
+                    )
+                    self._webui_thread.start()
+                    logger.info(f"WebUI 已通过后台线程启动 (0.0.0.0:{webui_port})")
             except Exception as e:
                 logger.error(f"WebUI 后台服务启动失败: {e}")
         else:
@@ -560,7 +571,23 @@ class WutheringWavesGachaPlugin(Star):
             yield event.plain_result("获取帮助信息时发生错误。")
 
     async def terminate(self):
+        if self._webui_task:
+            logger.info("正在停止 WebUI (asyncio 任务)...")
+            await stop_server_async()
+            try:
+                await asyncio.wait_for(self._webui_task, timeout=10)
+            except asyncio.TimeoutError:
+                logger.warning("WebUI 关闭超时，强制取消任务")
+                self._webui_task.cancel()
+                try:
+                    await self._webui_task
+                except asyncio.CancelledError:
+                    pass
+            except asyncio.CancelledError:
+                pass
+            self._webui_task = None
         if self._webui_thread and self._webui_thread.is_alive():
-            logger.info("正在停止 WebUI...")
+            logger.info("正在停止 WebUI (后台线程)...")
             stop_server()
+            self._webui_thread = None
         logger.info("鸣潮模拟抽卡插件已卸载")
